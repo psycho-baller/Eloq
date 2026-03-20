@@ -306,6 +306,73 @@ struct SuggestionCandidate: Codable, Equatable, Hashable, Identifiable {
     var confidence: Double
 }
 
+struct ConnectionSuggestion: Equatable, Identifiable {
+    var id: UUID
+    var focusWordID: UUID
+    var focusWordTerm: String
+    var focusNormalizedTerm: String
+    var focusKind: WordRoleKind
+    var counterpartTerm: String
+    var counterpartNormalizedTerm: String
+    var rationale: String
+    var useWhen: String
+    var caution: String
+    var confidence: Double
+    var status: SuggestionStatus
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        focusWordID: UUID,
+        focusWordTerm: String,
+        focusNormalizedTerm: String,
+        focusKind: WordRoleKind,
+        counterpartTerm: String,
+        counterpartNormalizedTerm: String,
+        rationale: String,
+        useWhen: String,
+        caution: String,
+        confidence: Double,
+        status: SuggestionStatus = .suggested,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.focusWordID = focusWordID
+        self.focusWordTerm = focusWordTerm
+        self.focusNormalizedTerm = focusNormalizedTerm
+        self.focusKind = focusKind
+        self.counterpartTerm = counterpartTerm
+        self.counterpartNormalizedTerm = counterpartNormalizedTerm
+        self.rationale = rationale
+        self.useWhen = useWhen
+        self.caution = caution
+        self.confidence = confidence
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    var overusedTerm: String {
+        focusKind == .overused ? focusWordTerm : counterpartTerm
+    }
+
+    var underusedTerm: String {
+        focusKind == .underused ? focusWordTerm : counterpartTerm
+    }
+
+    var title: String {
+        "\(overusedTerm)->\(underusedTerm)"
+    }
+
+    var pairKey: String {
+        let overusedNormalized = focusKind == .overused ? focusNormalizedTerm : counterpartNormalizedTerm
+        let underusedNormalized = focusKind == .underused ? focusNormalizedTerm : counterpartNormalizedTerm
+        return "\(WordRole.makeKey(normalizedTerm: overusedNormalized, kind: .overused))->\(WordRole.makeKey(normalizedTerm: underusedNormalized, kind: .underused))"
+    }
+}
+
 struct AIGraphSuggestionPayload: Codable, Equatable {
     var suggestions: [SuggestionCandidate]
 }

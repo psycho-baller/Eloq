@@ -183,6 +183,115 @@ struct EloqTests {
 
         #expect(candidates.map(\.displayTerm) == ["specificity"])
     }
+
+    @Test
+    @MainActor
+    func stagesAISuggestionsWithoutPersistingUntilAccepted() throws {
+        let harness = try TestHarness.make()
+        defer { harness.cleanup() }
+
+        let context = harness.container.mainContext
+        let focusWord = Word(displayTerm: "thing", normalizedTerm: "thing")
+        context.insert(focusWord)
+        context.insert(WordRole(word: focusWord, kind: .overused, primaryMode: true))
+        try context.save()
+
+        let workspace = EloqWorkspace(
+            modelContext: context,
+            storagePaths: harness.storagePaths,
+            registerHotKey: false
+        )
+
+        let staged = workspace.stageAISuggestions(
+            [
+                SuggestionCandidate(
+                    counterpartTerm: "constraint",
+                    rationale: "Sharper than a placeholder noun.",
+                    useWhen: "Use it when the sentence points to a real limiting factor.",
+                    caution: "Avoid it if you mean a literal object.",
+                    confidence: 0.92
+                )
+            ],
+            for: focusWord,
+            focusKind: .overused
+        )
+
+        #expect(staged == 1)
+        #expect(workspace.pendingSuggestions.count == 1)
+        #expect(workspace.words.map(\.displayTerm).sorted() == ["thing"])
+        #expect(workspace.connections.isEmpty)
+
+        let suggestion = try #require(workspace.pendingSuggestions.first)
+        workspace.accept(suggestion)
+
+        #expect(workspace.words.map(\.displayTerm).sorted() == ["constraint", "thing"])
+        #expect(workspace.connections.count == 1)
+        #expect(workspace.pendingSuggestions.isEmpty)
+        #expect(workspace.reviewedSuggestions.first?.status == .accepted)
+    }
+
+    @Test
+    @MainActor
+    func deletingWordRemovesRolesConnectionsAndStagedSuggestions() throws {
+        let harness = try TestHarness.make()
+        defer { harness.cleanup() }
+
+        let context = harness.container.mainContext
+        let overused = Word(displayTerm: "thing", normalizedTerm: "thing")
+        let underused = Word(displayTerm: "constraint", normalizedTerm: "constraint")
+        context.insert(overused)
+        context.insert(underused)
+
+        let overusedRole = WordRole(word: overused, kind: .overused, primaryMode: true)
+        let underusedRole = WordRole(word: underused, kind: .underused, primaryMode: true)
+        context.insert(overusedRole)
+        context.insert(underusedRole)
+        context.insert(
+            WordConnection(
+                fromRole: overusedRole,
+                toRole: underusedRole,
+                origin: .user,
+                status: .accepted,
+                rationale: "Existing accepted link.",
+                useWhen: "Use the sharper word when it is more precise.",
+                caution: "Avoid forcing it.",
+                confidence: 1
+            )
+        )
+        try context.save()
+
+        let workspace = EloqWorkspace(
+            modelContext: context,
+            storagePaths: harness.storagePaths,
+            registerHotKey: false
+        )
+
+        _ = workspace.stageAISuggestions(
+            [
+                SuggestionCandidate(
+                    counterpartTerm: "specificity",
+                    rationale: "Another sharper noun.",
+                    useWhen: "Use it when precision matters.",
+                    caution: "Skip it if it sounds forced.",
+                    confidence: 0.71
+                )
+            ],
+            for: overused,
+            focusKind: .overused
+        )
+
+        #expect(workspace.words.count == 2)
+        #expect(workspace.connections.count == 1)
+        #expect(workspace.pendingSuggestions.count == 1)
+
+        workspace.deleteWord(overused)
+
+        #expect(workspace.words.map(\.displayTerm) == ["constraint"])
+        #expect(workspace.roles.count == 1)
+        #expect(workspace.connections.isEmpty)
+        #expect(workspace.pendingSuggestions.isEmpty)
+        #expect(workspace.reviewedSuggestions.isEmpty)
+    }
 }
 
 private struct TestHarness {

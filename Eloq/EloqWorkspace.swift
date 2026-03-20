@@ -41,6 +41,7 @@ final class EloqWorkspace: ObservableObject {
     @Published var lastBanner: String?
     @Published var isImporting = false
     @Published var isGeneratingSuggestions = false
+    @Published private(set) var aiSuggestions: [ConnectionSuggestion] = []
     @Published var apiKeyDraft = ""
     @Published private(set) var hasOpenAIKey = false
     @Published private(set) var openAIKeyStatus = "No OpenAI key stored."
@@ -75,19 +76,19 @@ final class EloqWorkspace: ObservableObject {
         refresh()
     }
 
-    var pendingSuggestions: [WordConnection] {
-        connections
+    var pendingSuggestions: [ConnectionSuggestion] {
+        aiSuggestions
             .filter { $0.status == .suggested }
             .sorted { lhs, rhs in
                 if lhs.confidence == rhs.confidence {
-                    return connectionTitle(lhs) < connectionTitle(rhs)
+                    return lhs.title < rhs.title
                 }
                 return lhs.confidence > rhs.confidence
             }
     }
 
-    var reviewedSuggestions: [WordConnection] {
-        connections
+    var reviewedSuggestions: [ConnectionSuggestion] {
+        aiSuggestions
             .filter { $0.status != .suggested }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
@@ -178,6 +179,56 @@ final class EloqWorkspace: ObservableObject {
                     return lhs.updatedAt > rhs.updatedAt
                 }
                 return lhs.status.rawValue < rhs.status.rawValue
+            }
+    }
+
+    func deleteWord(_ word: Word) {
+        let wordRoles = roles.filter { $0.wordID == word.id }
+        let roleKeys = Set(wordRoles.map(\.key))
+        let linkedConnections = connections.filter { connection in
+            roleKeys.contains(connection.fromRoleKey) || roleKeys.contains(connection.toRoleKey)
+        }
+
+        for connection in linkedConnections {
+            modelContext.delete(connection)
+        }
+
+        for role in wordRoles {
+            modelContext.delete(role)
+        }
+
+        modelContext.delete(word)
+
+        aiSuggestions.removeAll { suggestion in
+            suggestion.focusWordID == word.id ||
+            suggestion.focusNormalizedTerm == word.normalizedTerm ||
+            suggestion.counterpartNormalizedTerm == word.normalizedTerm
+        }
+
+        do {
+            try saveAndRefresh()
+            if selectedWordID == word.id {
+                selectedWordID = nil
+            }
+            scheduleExport()
+            lastBanner = "Deleted \"\(word.displayTerm)\" from Eloq."
+        } catch {
+            lastBanner = error.localizedDescription
+        }
+    }
+
+    func pendingSuggestions(for word: Word, focusKind: WordRoleKind) -> [ConnectionSuggestion] {
+        aiSuggestions
+            .filter { suggestion in
+                suggestion.focusWordID == word.id &&
+                suggestion.focusKind == focusKind &&
+                suggestion.status == .suggested
+            }
+            .sorted { lhs, rhs in
+                if lhs.confidence == rhs.confidence {
+                    return lhs.counterpartTerm.localizedCaseInsensitiveCompare(rhs.counterpartTerm) == .orderedAscending
+                }
+                return lhs.confidence > rhs.confidence
             }
     }
 
@@ -297,12 +348,64 @@ final class EloqWorkspace: ObservableObject {
         updateStatus(for: connection, to: .accepted)
     }
 
+    func accept(_ suggestion: ConnectionSuggestion) {
+        guard let focusWord = words.first(where: { $0.id == suggestion.focusWordID }) else {
+            lastBanner = "The source word for this suggestion is no longer available."
+            return
+        }
+
+        let focusRole = ensureRole(for: focusWord, kind: suggestion.focusKind, primaryMode: false)
+        let counterpartWord = upsertWord(
+            displayTerm: suggestion.counterpartTerm,
+            normalizedTerm: suggestion.counterpartNormalizedTerm,
+            provenance: "ai",
+            context: ""
+        )
+        let counterpartRole = ensureRole(
+            for: counterpartWord,
+            kind: suggestion.focusKind.opposite,
+            primaryMode: false
+        )
+
+        let overusedRole = suggestion.focusKind == .overused ? focusRole : counterpartRole
+        let underusedRole = suggestion.focusKind == .underused ? focusRole : counterpartRole
+
+        _ = upsertConnection(
+            overusedRole: overusedRole,
+            underusedRole: underusedRole,
+            origin: .ai,
+            status: .accepted,
+            rationale: suggestion.rationale,
+            useWhen: suggestion.useWhen,
+            caution: suggestion.caution,
+            confidence: suggestion.confidence,
+            allowStatusOverride: true
+        )
+
+        do {
+            try saveAndRefresh()
+            updateSuggestionStatus(id: suggestion.id, to: .accepted)
+            scheduleExport()
+            lastBanner = "Accepted AI suggestion for \"\(counterpartWord.displayTerm)\"."
+        } catch {
+            lastBanner = error.localizedDescription
+        }
+    }
+
     func dismiss(_ connection: WordConnection) {
         updateStatus(for: connection, to: .dismissed)
     }
 
+    func dismiss(_ suggestion: ConnectionSuggestion) {
+        updateSuggestionStatus(id: suggestion.id, to: .dismissed)
+    }
+
     func restore(_ connection: WordConnection) {
         updateStatus(for: connection, to: .suggested)
+    }
+
+    func restore(_ suggestion: ConnectionSuggestion) {
+        updateSuggestionStatus(id: suggestion.id, to: .suggested)
     }
 
     func importAudoraVocabulary() {
@@ -730,7 +833,7 @@ final class EloqWorkspace: ObservableObject {
                 )
             }
 
-            let existingConnections = connections.compactMap { connection -> ExistingConnectionSummary? in
+            let persistedConnections = connections.compactMap { connection -> ExistingConnectionSummary? in
                 guard let overusedRole = self.role(forKey: connection.fromRoleKey),
                       let underusedRole = self.role(forKey: connection.toRoleKey),
                       let overused = self.word(for: overusedRole)?.displayTerm,
@@ -745,6 +848,14 @@ final class EloqWorkspace: ObservableObject {
                 )
             }
 
+            let pendingConnections = aiSuggestions.map { suggestion in
+                ExistingConnectionSummary(
+                    overused: suggestion.overusedTerm,
+                    underused: suggestion.underusedTerm,
+                    status: suggestion.status.rawValue
+                )
+            }
+
             let suggestions = try await aiService.suggestConnections(
                 for: RoleSummary(
                     term: focusWord.displayTerm,
@@ -752,16 +863,16 @@ final class EloqWorkspace: ObservableObject {
                     kind: role.kind.rawValue
                 ),
                 existingRoles: roleSummaries,
-                existingConnections: existingConnections
+                existingConnections: persistedConnections + pendingConnections
             )
 
-            try applySuggestions(suggestions, focusRole: role)
+            let stagedCount = stageAISuggestions(suggestions, for: focusWord, focusKind: role.kind)
             health = HealthStatus(
                 level: health.lastExportAt == nil ? .partial : .healthy,
                 title: "AI suggestions ready",
-                detail: suggestions.isEmpty
+                detail: stagedCount == 0
                     ? "No new opposite-side suggestions were generated for \"\(focusWord.displayTerm)\"."
-                    : "Generated \(suggestions.count) suggestion(s) for \"\(focusWord.displayTerm)\".",
+                    : "Queued \(stagedCount) suggestion(s) for review on \"\(focusWord.displayTerm)\".",
                 lastExportAt: health.lastExportAt,
                 lastAIError: nil
             )
@@ -778,11 +889,8 @@ final class EloqWorkspace: ObservableObject {
         }
     }
 
-    private func applySuggestions(_ suggestions: [SuggestionCandidate], focusRole: WordRole) throws {
-        guard let focusWord = word(for: focusRole) else {
-            return
-        }
-
+    @discardableResult
+    func stageAISuggestions(_ suggestions: [SuggestionCandidate], for focusWord: Word, focusKind: WordRoleKind) -> Int {
         let deduplicated = Dictionary(
             suggestions.compactMap { suggestion -> (String, SuggestionCandidate)? in
                 guard let term = Normalization.candidateTerm(suggestion.counterpartTerm) else {
@@ -803,36 +911,51 @@ final class EloqWorkspace: ObservableObject {
             uniquingKeysWith: { first, _ in first }
         )
 
-        for (_, suggestion) in deduplicated.sorted(by: { $0.key < $1.key }) {
-            let counterpartWord = upsertWord(
-                displayTerm: suggestion.counterpartTerm,
-                normalizedTerm: Normalization.normalizedTerm(suggestion.counterpartTerm),
-                provenance: "ai",
-                context: ""
-            )
-            let counterpartRole = ensureRole(
-                for: counterpartWord,
-                kind: focusRole.kind.opposite,
-                primaryMode: false
+        var stagedCount = 0
+
+        for (normalizedCounterpart, suggestion) in deduplicated.sorted(by: { $0.key < $1.key }) {
+            let pairKey = connectionKey(
+                focusNormalizedTerm: focusWord.normalizedTerm,
+                focusKind: focusKind,
+                counterpartNormalizedTerm: normalizedCounterpart
             )
 
-            let overusedRole = focusRole.kind == .overused ? focusRole : counterpartRole
-            let underusedRole = focusRole.kind == .underused ? focusRole : counterpartRole
+            if connections.contains(where: { $0.key == pairKey }) {
+                continue
+            }
 
-            _ = upsertConnection(
-                overusedRole: overusedRole,
-                underusedRole: underusedRole,
-                origin: .ai,
-                status: .suggested,
-                rationale: suggestion.rationale,
-                useWhen: suggestion.useWhen,
-                caution: suggestion.caution,
-                confidence: min(max(suggestion.confidence, 0), 1)
+            if let existingIndex = aiSuggestions.firstIndex(where: { $0.pairKey == pairKey }) {
+                if aiSuggestions[existingIndex].status == .suggested {
+                    aiSuggestions[existingIndex].counterpartTerm = suggestion.counterpartTerm
+                    aiSuggestions[existingIndex].counterpartNormalizedTerm = normalizedCounterpart
+                    aiSuggestions[existingIndex].rationale = suggestion.rationale
+                    aiSuggestions[existingIndex].useWhen = suggestion.useWhen
+                    aiSuggestions[existingIndex].caution = suggestion.caution
+                    aiSuggestions[existingIndex].confidence = min(max(suggestion.confidence, 0), 1)
+                    aiSuggestions[existingIndex].updatedAt = .now
+                    stagedCount += 1
+                }
+                continue
+            }
+
+            aiSuggestions.append(
+                ConnectionSuggestion(
+                    focusWordID: focusWord.id,
+                    focusWordTerm: focusWord.displayTerm,
+                    focusNormalizedTerm: focusWord.normalizedTerm,
+                    focusKind: focusKind,
+                    counterpartTerm: suggestion.counterpartTerm,
+                    counterpartNormalizedTerm: normalizedCounterpart,
+                    rationale: suggestion.rationale,
+                    useWhen: suggestion.useWhen,
+                    caution: suggestion.caution,
+                    confidence: min(max(suggestion.confidence, 0), 1)
+                )
             )
+            stagedCount += 1
         }
 
-        try saveAndRefresh()
-        scheduleExport()
+        return stagedCount
     }
 
     private func upsertWord(
@@ -959,6 +1082,10 @@ final class EloqWorkspace: ObservableObject {
         return "\(overused)->\(underused)"
     }
 
+    func connectionTitle(_ suggestion: ConnectionSuggestion) -> String {
+        suggestion.title
+    }
+
     private func manualConnectionCopy(
         focusWord: Word,
         focusKind: WordRoleKind,
@@ -1019,5 +1146,23 @@ final class EloqWorkspace: ObservableObject {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(LegacyWritingAwarenessState.self, from: data)
+    }
+
+    private func updateSuggestionStatus(id: UUID, to status: SuggestionStatus) {
+        guard let index = aiSuggestions.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        aiSuggestions[index].status = status
+        aiSuggestions[index].updatedAt = .now
+    }
+
+    private func connectionKey(
+        focusNormalizedTerm: String,
+        focusKind: WordRoleKind,
+        counterpartNormalizedTerm: String
+    ) -> String {
+        let overusedNormalized = focusKind == .overused ? focusNormalizedTerm : counterpartNormalizedTerm
+        let underusedNormalized = focusKind == .underused ? focusNormalizedTerm : counterpartNormalizedTerm
+        return "\(WordRole.makeKey(normalizedTerm: overusedNormalized, kind: .overused))->\(WordRole.makeKey(normalizedTerm: underusedNormalized, kind: .underused))"
     }
 }

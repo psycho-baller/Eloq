@@ -279,16 +279,16 @@ private struct InboxTab: View {
                             }
 
                             Section("Pending") {
-                                ForEach(workspace.pendingSuggestions, id: \.id) { connection in
+                                ForEach(workspace.pendingSuggestions, id: \.id) { suggestion in
                                     SuggestionRow(
-                                        title: workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> "),
-                                        status: connection.status,
-                                        rationale: connection.rationale,
-                                        useWhen: connection.useWhen,
-                                        caution: connection.caution,
-                                        confidence: connection.confidence,
-                                        onAccept: { workspace.accept(connection) },
-                                        onDismiss: { workspace.dismiss(connection) },
+                                        title: workspace.connectionTitle(suggestion).replacingOccurrences(of: "->", with: " -> "),
+                                        status: suggestion.status,
+                                        rationale: suggestion.rationale,
+                                        useWhen: suggestion.useWhen,
+                                        caution: suggestion.caution,
+                                        confidence: suggestion.confidence,
+                                        onAccept: { workspace.accept(suggestion) },
+                                        onDismiss: { workspace.dismiss(suggestion) },
                                         onRestore: nil
                                     )
                                 }
@@ -297,17 +297,17 @@ private struct InboxTab: View {
 
                         if !workspace.reviewedSuggestions.isEmpty {
                             Section("Reviewed") {
-                                ForEach(Array(workspace.reviewedSuggestions.prefix(18)), id: \.id) { connection in
+                                ForEach(Array(workspace.reviewedSuggestions.prefix(18)), id: \.id) { suggestion in
                                     SuggestionRow(
-                                        title: workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> "),
-                                        status: connection.status,
-                                        rationale: connection.rationale,
-                                        useWhen: connection.useWhen,
-                                        caution: connection.caution,
-                                        confidence: connection.confidence,
-                                        onAccept: connection.status == .dismissed ? { workspace.accept(connection) } : nil,
-                                        onDismiss: connection.status == .accepted ? { workspace.dismiss(connection) } : nil,
-                                        onRestore: { workspace.restore(connection) }
+                                        title: workspace.connectionTitle(suggestion).replacingOccurrences(of: "->", with: " -> "),
+                                        status: suggestion.status,
+                                        rationale: suggestion.rationale,
+                                        useWhen: suggestion.useWhen,
+                                        caution: suggestion.caution,
+                                        confidence: suggestion.confidence,
+                                        onAccept: suggestion.status == .dismissed ? { workspace.accept(suggestion) } : nil,
+                                        onDismiss: suggestion.status == .accepted ? { workspace.dismiss(suggestion) } : nil,
+                                        onRestore: { workspace.restore(suggestion) }
                                     )
                                 }
                             }
@@ -391,6 +391,7 @@ private struct LibraryTab: View {
 private struct WordDetailView: View {
     @ObservedObject var workspace: EloqWorkspace
     let word: Word
+    @State private var isShowingDeleteConfirmation = false
 
     private var roles: [WordRole] {
         workspace.roles(for: word)
@@ -453,6 +454,27 @@ private struct WordDetailView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .navigationTitle(word.displayTerm)
+        .toolbar {
+            ToolbarItem {
+                Button(role: .destructive) {
+                    isShowingDeleteConfirmation = true
+                } label: {
+                    Label("Delete Word", systemImage: "trash")
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete \"\(word.displayTerm)\"?",
+            isPresented: $isShowingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Word", role: .destructive) {
+                workspace.deleteWord(word)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the word, its roles, linked connections, and any staged AI suggestions that mention it.")
+        }
     }
 }
 
@@ -466,8 +488,12 @@ private struct RoleConnectionPanel: View {
         workspace.scopedConnections(for: focusWord, focusKind: focusKind)
     }
 
-    private var suggestedConnections: [WordConnection] {
-        scopedConnections.filter { $0.status == .suggested }
+    private var canonicalConnections: [WordConnection] {
+        scopedConnections.filter { $0.status != .suggested }
+    }
+
+    private var suggestedConnections: [ConnectionSuggestion] {
+        workspace.pendingSuggestions(for: focusWord, focusKind: focusKind)
     }
 
     private var availableWords: [Word] {
@@ -537,13 +563,11 @@ private struct RoleConnectionPanel: View {
 
                 if !suggestedConnections.isEmpty {
                     ConnectionChipRow(title: chipTitle) {
-                        ForEach(suggestedConnections, id: \.id) { connection in
-                            if let counterpart = workspace.counterpartWord(for: connection, focusKind: focusKind) {
-                                Button(counterpart.displayTerm) {
-                                    workspace.accept(connection)
-                                }
-                                .buttonStyle(.borderedProminent)
+                        ForEach(suggestedConnections, id: \.id) { suggestion in
+                            Button(suggestion.counterpartTerm) {
+                                workspace.accept(suggestion)
                             }
+                            .buttonStyle(.borderedProminent)
                         }
                     }
                 }
@@ -579,12 +603,30 @@ private struct RoleConnectionPanel: View {
 
                 Divider()
 
-                if scopedConnections.isEmpty {
+                if suggestedConnections.isEmpty && canonicalConnections.isEmpty {
                     Text("No links for this side yet.")
                         .foregroundStyle(.secondary)
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(scopedConnections, id: \.id) { connection in
+                        ForEach(suggestedConnections, id: \.id) { suggestion in
+                            SuggestionRow(
+                                title: suggestion.counterpartTerm,
+                                status: suggestion.status,
+                                rationale: suggestion.rationale,
+                                useWhen: suggestion.useWhen,
+                                caution: suggestion.caution,
+                                confidence: suggestion.confidence,
+                                onAccept: { workspace.accept(suggestion) },
+                                onDismiss: { workspace.dismiss(suggestion) },
+                                onRestore: nil
+                            )
+
+                            if suggestion.id != suggestedConnections.last?.id || !canonicalConnections.isEmpty {
+                                Divider()
+                            }
+                        }
+
+                        ForEach(canonicalConnections, id: \.id) { connection in
                             SuggestionRow(
                                 title: workspace.counterpartWord(for: connection, focusKind: focusKind)?.displayTerm ?? "Linked word",
                                 status: connection.status,
@@ -603,7 +645,7 @@ private struct RoleConnectionPanel: View {
                                     : nil
                             )
 
-                            if connection.id != scopedConnections.last?.id {
+                            if connection.id != canonicalConnections.last?.id {
                                 Divider()
                             }
                         }
