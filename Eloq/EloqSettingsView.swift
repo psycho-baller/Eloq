@@ -22,6 +22,8 @@ struct EloqSettingsView: View {
                 }
         }
         .frame(minWidth: 620, minHeight: 460)
+        .background(EloqTheme.canvas.ignoresSafeArea())
+        .groupBoxStyle(EloqPanelGroupBoxStyle())
     }
 }
 
@@ -42,11 +44,10 @@ private struct AISettingsTab: View {
 
                 Spacer()
 
-                Text(workspace.hasOpenAIKey ? "Stored" : "Missing")
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.quaternary, in: Capsule())
+                EloqChip(
+                    text: workspace.hasOpenAIKey ? "Stored" : "Missing",
+                    tone: workspace.hasOpenAIKey ? .accent : .warning
+                )
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -79,6 +80,7 @@ private struct AISettingsTab: View {
             Spacer()
         }
         .padding(24)
+        .background(EloqTheme.canvas)
     }
 }
 
@@ -119,6 +121,7 @@ private struct CaptureSettingsTab: View {
             Spacer()
         }
         .padding(24)
+        .background(EloqTheme.canvas)
     }
 }
 
@@ -197,6 +200,7 @@ private struct StorageSettingsTab: View {
             Spacer()
         }
         .padding(24)
+        .background(EloqTheme.canvas)
     }
 
     private func healthSymbolName(_ level: HealthLevel) -> String {
@@ -213,11 +217,11 @@ private struct StorageSettingsTab: View {
     private func healthTintColor(_ level: HealthLevel) -> Color {
         switch level {
         case .healthy:
-            return .green
+            return EloqTheme.accent
         case .partial:
-            return .orange
+            return EloqTheme.warning
         case .error:
-            return .red
+            return EloqTheme.danger
         }
     }
 }

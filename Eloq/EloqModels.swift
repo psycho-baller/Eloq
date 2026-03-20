@@ -444,6 +444,7 @@ enum WorkspaceScreen: String, CaseIterable, Identifiable {
     case home
     case inbox
     case library
+    case atlas
 
     var id: String { rawValue }
 
@@ -455,6 +456,8 @@ enum WorkspaceScreen: String, CaseIterable, Identifiable {
             return "Inbox"
         case .library:
             return "Library"
+        case .atlas:
+            return "Atlas"
         }
     }
 }

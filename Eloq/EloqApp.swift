@@ -26,6 +26,8 @@ struct EloqApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(workspace: workspace)
+                .tint(EloqTheme.accent)
+                .preferredColorScheme(.dark)
         }
         .modelContainer(sharedModelContainer)
         .commands {
@@ -43,6 +45,8 @@ struct EloqApp: App {
 
         Settings {
             EloqSettingsView(workspace: workspace)
+                .tint(EloqTheme.accent)
+                .preferredColorScheme(.dark)
         }
     }
 }

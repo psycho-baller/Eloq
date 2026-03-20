@@ -109,6 +109,10 @@ final class EloqWorkspace: ObservableObject {
         connections.filter { $0.status == .accepted }.count
     }
 
+    var atlasSnapshot: SnapshotReadModel {
+        buildSnapshot()
+    }
+
     var recentWords: [Word] {
         words.sorted { lhs, rhs in
             if lhs.updatedAt == rhs.updatedAt {

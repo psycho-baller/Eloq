@@ -38,13 +38,17 @@
 - The right rail can be information-dense; the primary column must stay visually calm.
 
 ## Color System
-- Canvas: deep graphite.
-- Elevated panel: slightly lighter graphite with soft separation.
-- Primary text: warm near-white.
-- Secondary text: desaturated stone-gray.
-- Accent: restrained teal-leaning mint reserved for acceptance, focus, and healthy state.
-- Partial health: muted amber.
-- Error health: restrained red, never alarm-siren red.
+- Canvas: `#12161A`.
+- Elevated panel: `#1B2127`.
+- Raised panel or quiet control surface: `#222A32`.
+- Primary text: `#F2EEE7`.
+- Secondary text: `#A6B0B6`.
+- Accent: `Eloq Verdigris` `#79AFA3`.
+- Accent pressed/deeper state: `#5D8F84`.
+- Accent wash: `rgba(121, 175, 163, 0.18)`.
+- Partial health: muted amber `#C69662`.
+- Error health: restrained red `#B46E69`.
+- The same Eloq accent must be used in both the macOS app and the Obsidian plugin for primary actions, accepted links, and healthy state.
 
 ## Surface Model
 - One page canvas.
