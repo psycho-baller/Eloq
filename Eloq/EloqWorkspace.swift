@@ -96,10 +96,43 @@ final class EloqWorkspace: ObservableObject {
         words.count
     }
 
+    var overusedWordCount: Int {
+        roles.filter { $0.kind == .overused }.count
+    }
+
+    var underusedWordCount: Int {
+        roles.filter { $0.kind == .underused }.count
+    }
+
+    var acceptedConnectionCount: Int {
+        connections.filter { $0.status == .accepted }.count
+    }
+
+    var recentWords: [Word] {
+        words.sorted { lhs, rhs in
+            if lhs.updatedAt == rhs.updatedAt {
+                return lhs.displayTerm.localizedCaseInsensitiveCompare(rhs.displayTerm) == .orderedAscending
+            }
+            return lhs.updatedAt > rhs.updatedAt
+        }
+    }
+
     var captureStatusText: String {
         selectionCaptureManager.isTrusted
             ? "Global capture is ready on Control + Option + Command + L."
             : "Enable Accessibility access for true global capture. Clipboard fallback still works."
+    }
+
+    var snapshotPathText: String {
+        storagePaths.snapshotURL.path
+    }
+
+    var storageDirectoryPathText: String {
+        storagePaths.rootDirectory.path
+    }
+
+    var audoraImportDirectoryPathText: String {
+        storagePaths.audoraSeedURL.deletingLastPathComponent().path
     }
 
     func filteredWords() -> [Word] {
@@ -152,6 +185,14 @@ final class EloqWorkspace: ObservableObject {
         selectionCaptureManager.requestAccess()
     }
 
+    func openAccessibilitySettings() {
+        selectionCaptureManager.openAccessibilitySettings()
+    }
+
+    func dismissBanner() {
+        lastBanner = nil
+    }
+
     func saveOpenAIKey() {
         let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -164,7 +205,6 @@ final class EloqWorkspace: ObservableObject {
             return
         }
 
-        apiKeyDraft = ""
         refreshOpenAIKeyStatus()
         lastBanner = "Saved your OpenAI key to the macOS Keychain."
     }
@@ -387,6 +427,22 @@ final class EloqWorkspace: ObservableObject {
         }
     }
 
+    func revealSnapshotInFinder() {
+        if fileManager.fileExists(atPath: storagePaths.snapshotURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([storagePaths.snapshotURL])
+        } else {
+            NSWorkspace.shared.open(storagePaths.rootDirectory)
+        }
+    }
+
+    func revealStorageDirectoryInFinder() {
+        NSWorkspace.shared.open(storagePaths.rootDirectory)
+    }
+
+    func revealAudoraImportDirectoryInFinder() {
+        NSWorkspace.shared.open(storagePaths.audoraSeedURL.deletingLastPathComponent())
+    }
+
     func requestSuggestions(for word: Word, focusKind: WordRoleKind) {
         guard let focusRole = role(for: word, kind: focusKind) else {
             lastBanner = "Save \"\(word.displayTerm)\" as \(focusKind.title.lowercased()) before asking AI for links."
@@ -538,7 +594,9 @@ final class EloqWorkspace: ObservableObject {
     }
 
     private func refreshOpenAIKeyStatus() {
-        hasOpenAIKey = EloqKeychain.shared.openAIKey() != nil
+        let storedKey = EloqKeychain.shared.openAIKey()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        apiKeyDraft = storedKey
+        hasOpenAIKey = !storedKey.isEmpty
         openAIKeyStatus = hasOpenAIKey
             ? "Stored in macOS Keychain. AI suggestions are enabled."
             : "No OpenAI key stored. Manual vocabulary management still works."

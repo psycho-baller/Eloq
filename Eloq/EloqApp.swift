@@ -40,5 +40,9 @@ struct EloqApp: App {
                 }
             }
         }
+
+        Settings {
+            EloqSettingsView(workspace: workspace)
+        }
     }
 }

@@ -1,855 +1,634 @@
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var workspace: EloqWorkspace
 
     var body: some View {
-        ZStack {
-            EloqPalette.canvas.ignoresSafeArea()
-
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 20) {
-                    header
-
-                    if let banner = workspace.lastBanner {
-                        bannerView(banner)
-                    }
-
-                    screenContent
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
-        }
-        .preferredColorScheme(.dark)
-        .frame(minWidth: 1180, minHeight: 760)
-    }
-
-    private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Eloq")
-                    .font(.eloqDisplay(size: 34))
-                    .foregroundStyle(EloqPalette.ink)
-
-                Text("A calm lexical companion for the words you want to outgrow and the words you want to reach for.")
-                    .font(.eloqBody(size: 14, weight: .medium))
-                    .foregroundStyle(EloqPalette.mutedInk)
-                    .frame(maxWidth: 560, alignment: .leading)
-            }
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 10) {
-                ForEach(WorkspaceScreen.allCases) { screen in
-                    Button {
-                        workspace.currentScreen = screen
-                    } label: {
-                        Text(screen.title)
-                            .font(.eloqBody(size: 13, weight: .semibold))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(
-                                Capsule()
-                                    .fill(workspace.currentScreen == screen ? EloqPalette.panelStrong : EloqPalette.panel)
-                            )
-                            .overlay(
-                                Capsule()
-                                    .stroke(workspace.currentScreen == screen ? EloqPalette.accent.opacity(0.35) : EloqPalette.stroke, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(workspace.currentScreen == screen ? EloqPalette.ink : EloqPalette.mutedInk)
+        VStack(spacing: 0) {
+            if let banner = workspace.lastBanner {
+                BannerStrip(message: banner) {
+                    workspace.dismissBanner()
                 }
             }
 
-            healthPill
-        }
-    }
+            TabView(selection: $workspace.currentScreen) {
+                HomeTab(workspace: workspace)
+                    .tabItem {
+                        Label("Home", systemImage: "house")
+                    }
+                    .tag(WorkspaceScreen.home)
 
-    private var healthPill: some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            Text(workspace.health.title)
-                .font(.eloqBody(size: 12, weight: .bold))
-                .foregroundStyle(EloqPalette.ink)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule()
-                        .fill(workspace.health.level.color.opacity(0.22))
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(workspace.health.level.color.opacity(0.38), lineWidth: 1)
-                )
+                InboxTab(workspace: workspace)
+                    .tabItem {
+                        Label("Inbox", systemImage: "sparkles")
+                    }
+                    .tag(WorkspaceScreen.inbox)
 
-            Text(workspace.health.detail)
-                .font(.eloqBody(size: 11, weight: .medium))
-                .foregroundStyle(EloqPalette.mutedInk)
-                .frame(maxWidth: 280, alignment: .trailing)
+                LibraryTab(workspace: workspace)
+                    .tabItem {
+                        Label("Library", systemImage: "books.vertical")
+                    }
+                    .tag(WorkspaceScreen.library)
+            }
         }
-    }
-
-    @ViewBuilder
-    private var screenContent: some View {
-        switch workspace.currentScreen {
-        case .home:
-            HomeScreen(workspace: workspace)
-        case .inbox:
-            InboxScreen(workspace: workspace)
-        case .library:
-            LibraryScreen(workspace: workspace)
-        }
-    }
-
-    private func bannerView(_ message: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles.rectangle.stack")
-                .foregroundStyle(EloqPalette.accent)
-            Text(message)
-                .font(.eloqBody(size: 13, weight: .medium))
-                .foregroundStyle(EloqPalette.ink)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(EloqPalette.panel)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(EloqPalette.stroke, lineWidth: 1)
-        )
+        .frame(minWidth: 1024, minHeight: 700)
     }
 }
 
-private struct HomeScreen: View {
+private struct HomeTab: View {
     @ObservedObject var workspace: EloqWorkspace
 
     var body: some View {
-        HStack(alignment: .top, spacing: 18) {
-            VStack(spacing: 18) {
-                quickAddCard
-                onboardingCard
-            }
-            .frame(maxWidth: .infinity, alignment: .top)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    quickAddPanel
 
-            VStack(spacing: 18) {
-                inboxSummaryCard
-                importCard
-                openAIKeyCard
-                recentWordsCard
-            }
-            .frame(width: 360)
-        }
-    }
-
-    private var quickAddCard: some View {
-        EloqPanel {
-            VStack(alignment: .leading, spacing: 18) {
-                sectionEyebrow("Quick Add")
-
-                Text("Add a word in seconds. Save first, let AI map the opposite side immediately after.")
-                    .font(.eloqBody(size: 15, weight: .medium))
-                    .foregroundStyle(EloqPalette.mutedInk)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    TextField("constraint", text: $workspace.quickAddText)
-                        .textFieldStyle(.plain)
-                        .font(.eloqDisplay(size: 26))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .fill(EloqPalette.panelStrong)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .stroke(EloqPalette.stroke, lineWidth: 1)
+                    HStack(alignment: .top, spacing: 16) {
+                        MetricPanel(
+                            title: "Library",
+                            value: "\(workspace.totalWordCount)",
+                            detail: "\(workspace.overusedWordCount) overused • \(workspace.underusedWordCount) underused",
+                            systemImage: "text.book.closed"
                         )
 
-                    Picker("Mode", selection: $workspace.quickAddMode) {
-                        ForEach(WordRoleKind.allCases) { kind in
-                            Text(kind.title).tag(kind)
-                        }
+                        MetricPanel(
+                            title: "Inbox",
+                            value: "\(workspace.pendingSuggestions.count)",
+                            detail: workspace.pendingSuggestions.isEmpty ? "Nothing waiting for review" : "Suggestions ready to accept or dismiss",
+                            systemImage: "sparkles"
+                        )
+
+                        MetricPanel(
+                            title: "Connections",
+                            value: "\(workspace.acceptedConnectionCount)",
+                            detail: "Accepted links in the active vocabulary graph",
+                            systemImage: "point.3.connected.trianglepath.dotted"
+                        )
                     }
-                    .pickerStyle(.segmented)
+
+                    HStack(alignment: .top, spacing: 16) {
+                        recentWordsPanel
+                        operationsPanel
+                    }
                 }
-
-                HStack(spacing: 12) {
-                    Button {
-                        workspace.submitQuickAdd()
-                    } label: {
-                        Label("Save Word", systemImage: "arrow.up.circle.fill")
-                    }
-                    .buttonStyle(EloqPrimaryButtonStyle())
-
-                    Button {
-                        workspace.captureSelectionIntoDraft()
-                    } label: {
-                        Label("Capture Selection", systemImage: "text.cursor")
-                    }
-                    .buttonStyle(EloqSecondaryButtonStyle())
-                }
-
-                Text(workspace.captureStatusText)
-                    .font(.eloqBody(size: 12, weight: .medium))
-                    .foregroundStyle(EloqPalette.mutedInk)
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .navigationTitle("Eloq")
         }
     }
 
-    private var onboardingCard: some View {
-        EloqPanel {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionEyebrow("First Run")
+    private var quickAddPanel: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Build your vocabulary graph")
+                            .font(.title2)
+                            .fontWeight(.semibold)
 
-                if workspace.totalWordCount == 0 {
-                    Text("Start with one overused word and one underused word.")
-                        .font(.eloqDisplay(size: 24))
-                        .foregroundStyle(EloqPalette.ink)
-
-                    Text("Example: save “thing” as overused, then save “constraint” as underused. Eloq will suggest the connection so the vocabulary graph starts feeling alive right away.")
-                        .font(.eloqBody(size: 14, weight: .medium))
-                        .foregroundStyle(EloqPalette.mutedInk)
-                } else {
-                    Text("\(workspace.totalWordCount) words in your graph")
-                        .font(.eloqDisplay(size: 24))
-                        .foregroundStyle(EloqPalette.ink)
-
-                    Text("The main write surface is this Mac app. Obsidian and the browser extension now read the exported Eloq snapshot.")
-                        .font(.eloqBody(size: 14, weight: .medium))
-                        .foregroundStyle(EloqPalette.mutedInk)
-                }
-            }
-        }
-    }
-
-    private var inboxSummaryCard: some View {
-        EloqPanel {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionEyebrow("Inbox")
-
-                Text("\(workspace.pendingSuggestions.count)")
-                    .font(.eloqDisplay(size: 42))
-                    .foregroundStyle(EloqPalette.ink)
-
-                Text("pending AI suggestions")
-                    .font(.eloqBody(size: 14, weight: .semibold))
-                    .foregroundStyle(EloqPalette.mutedInk)
-
-                if workspace.pendingSuggestions.isEmpty {
-                    Text("No suggestions to review yet. Add a word or import Audora vocabulary.")
-                        .font(.eloqBody(size: 13, weight: .medium))
-                        .foregroundStyle(EloqPalette.mutedInk)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(workspace.pendingSuggestions.prefix(3)), id: \.id) { connection in
-                            Text(summaryLine(for: connection))
-                                .font(.eloqBody(size: 13, weight: .medium))
-                                .foregroundStyle(EloqPalette.ink)
-                                .lineLimit(1)
-                        }
+                        Text("Save a word, decide whether it belongs on the overused or underused side, and let Eloq suggest the opposite-side links immediately.")
+                            .foregroundStyle(.secondary)
                     }
-                }
-
-                Button("Review Inbox") {
-                    workspace.currentScreen = .inbox
-                }
-                .buttonStyle(EloqSecondaryButtonStyle())
-            }
-        }
-    }
-
-    private var importCard: some View {
-        EloqPanel {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionEyebrow("Audora Import")
-
-                Text(workspace.importReport.sourceSummary)
-                    .font(.eloqBody(size: 13, weight: .medium))
-                    .foregroundStyle(EloqPalette.mutedInk)
-
-                HStack(spacing: 16) {
-                    metric("Words", value: workspace.importReport.importedWords)
-                    metric("Links", value: workspace.importReport.importedConnections)
-                    metric("Skipped", value: workspace.importReport.skippedRules)
-                }
-
-                HStack(spacing: 12) {
-                    Button {
-                        workspace.importAudoraVocabulary()
-                    } label: {
-                        Label(workspace.isImporting ? "Importing…" : "Import Audora Vocabulary", systemImage: "tray.and.arrow.down.fill")
-                    }
-                    .buttonStyle(EloqPrimaryButtonStyle())
-                    .disabled(workspace.isImporting)
-
-                    Button {
-                        workspace.exportNow()
-                    } label: {
-                        Label("Export Snapshot", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(EloqSecondaryButtonStyle())
-                }
-            }
-        }
-    }
-
-    private var recentWordsCard: some View {
-        EloqPanel {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionEyebrow("Recent Words")
-
-                if workspace.filteredWords().isEmpty {
-                    Text("Nothing saved yet.")
-                        .font(.eloqBody(size: 13, weight: .medium))
-                        .foregroundStyle(EloqPalette.mutedInk)
-                } else {
-                    ForEach(Array(workspace.filteredWords().prefix(5)), id: \.id) { word in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(word.displayTerm)
-                                    .font(.eloqBody(size: 14, weight: .semibold))
-                                    .foregroundStyle(EloqPalette.ink)
-                                Text(workspace.roles(for: word).map { $0.kind.title }.joined(separator: " · "))
-                                    .font(.eloqBody(size: 12, weight: .medium))
-                                    .foregroundStyle(EloqPalette.mutedInk)
-                            }
-                            Spacer()
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-            }
-        }
-    }
-
-    private var openAIKeyCard: some View {
-        EloqPanel {
-            VStack(alignment: .leading, spacing: 14) {
-                sectionEyebrow("OpenAI")
-
-                HStack(alignment: .center) {
-                    Text(workspace.hasOpenAIKey ? "AI ready" : "API key required")
-                        .font(.eloqBody(size: 14, weight: .semibold))
-                        .foregroundStyle(EloqPalette.ink)
 
                     Spacer()
 
-                    Text(workspace.hasOpenAIKey ? "Stored" : "Missing")
-                        .font(.eloqBody(size: 11, weight: .bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule()
-                                .fill((workspace.hasOpenAIKey ? EloqPalette.accent : EloqPalette.warn).opacity(0.18))
-                        )
-                }
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Text("\(workspace.pendingSuggestions.count) pending")
+                            .font(.headline)
+                            .monospacedDigit()
 
-                Text(workspace.openAIKeyStatus)
-                    .font(.eloqBody(size: 13, weight: .medium))
-                    .foregroundStyle(EloqPalette.mutedInk)
-
-                SecureField(workspace.hasOpenAIKey ? "Replace OpenAI API key" : "Paste OpenAI API key", text: $workspace.apiKeyDraft)
-                    .textFieldStyle(.plain)
-                    .font(.eloqBody(size: 13, weight: .medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(EloqPalette.panelStrong)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(EloqPalette.stroke, lineWidth: 1)
-                    )
-
-                HStack(spacing: 12) {
-                    Button {
-                        workspace.saveOpenAIKey()
-                    } label: {
-                        Label(workspace.hasOpenAIKey ? "Replace Key" : "Save Key", systemImage: "key.fill")
-                    }
-                    .buttonStyle(EloqPrimaryButtonStyle())
-
-                    if workspace.hasOpenAIKey {
-                        Button {
-                            workspace.clearOpenAIKey()
-                        } label: {
-                            Label("Clear Key", systemImage: "trash")
+                        Button("Review Inbox") {
+                            workspace.currentScreen = .inbox
                         }
-                        .buttonStyle(EloqSecondaryButtonStyle())
+                        .buttonStyle(.bordered)
                     }
                 }
 
-                Text("Eloq stores this key in your macOS Keychain. Local word storage continues to work even when no key is present.")
-                    .font(.eloqBody(size: 11, weight: .medium))
-                    .foregroundStyle(EloqPalette.subtleInk)
+                TextField("Add a word or short phrase", text: $workspace.quickAddText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.title3)
+                    .onSubmit {
+                        workspace.submitQuickAdd()
+                    }
+
+                Picker("Mode", selection: $workspace.quickAddMode) {
+                    ForEach(WordRoleKind.allCases) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                HStack {
+                    Button("Save Word") {
+                        workspace.submitQuickAdd()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(workspace.quickAddText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button("Capture Selection") {
+                        workspace.captureSelectionIntoDraft()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Open Library") {
+                        workspace.currentScreen = .library
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
+        } label: {
+            Label("Quick Add", systemImage: "plus.circle")
         }
     }
 
-    private func metric(_ label: String, value: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased())
-                .font(.eloqBody(size: 10, weight: .bold))
-                .foregroundStyle(EloqPalette.subtleInk)
-            Text(String(value))
-                .font(.eloqDisplay(size: 24))
-                .foregroundStyle(EloqPalette.ink)
+    private var recentWordsPanel: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                if workspace.recentWords.isEmpty {
+                    Text("Start by saving an overused word and an underused word. Eloq will use those as the first shape of the graph.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(workspace.recentWords.prefix(6)), id: \.id) { word in
+                        Button {
+                            workspace.selectWord(word)
+                            workspace.currentScreen = .library
+                        } label: {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(word.displayTerm)
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+
+                                    Text(workspace.roles(for: word).map { $0.kind.title }.joined(separator: " • "))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+
+                                Text(word.updatedAt.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+
+                        if word.id != workspace.recentWords.prefix(6).last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Recent Words", systemImage: "clock")
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private func sectionEyebrow(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.eloqBody(size: 11, weight: .bold))
-            .tracking(1.5)
-            .foregroundStyle(EloqPalette.subtleInk)
-    }
+    private var operationsPanel: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Capture")
+                        .font(.headline)
 
-    private func summaryLine(for connection: WordConnection) -> String {
-        workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> ")
+                    Text(workspace.captureStatusText)
+                        .foregroundStyle(.secondary)
+
+                    HStack {
+                        Button("Request Access") {
+                            workspace.requestAccessibilityAccess()
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Accessibility Settings") {
+                            workspace.openAccessibilitySettings()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Import & Export")
+                        .font(.headline)
+
+                    Text(workspace.importReport.sourceSummary)
+                        .foregroundStyle(.secondary)
+
+                    Text("\(workspace.importReport.importedWords) words • \(workspace.importReport.importedConnections) connections • \(workspace.importReport.skippedRules) skipped")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+
+                    HStack {
+                        Button(workspace.isImporting ? "Importing…" : "Import Audora") {
+                            workspace.importAudoraVocabulary()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(workspace.isImporting)
+
+                        Button("Export Snapshot") {
+                            workspace.exportNow()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                Divider()
+
+                HealthSummaryView(health: workspace.health)
+
+                Text("OpenAI and storage configuration live in Settings.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } label: {
+            Label("Operations", systemImage: "gearshape.2")
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
-private struct InboxScreen: View {
+private struct InboxTab: View {
     @ObservedObject var workspace: EloqWorkspace
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if workspace.pendingSuggestions.isEmpty && workspace.reviewedSuggestions.isEmpty {
+                    UnavailableStateView(
+                        systemImage: "sparkles",
+                        title: "No Suggestions Yet",
+                        message: "Add a word or import Audora vocabulary and Eloq will queue AI-discovered links here."
+                    )
+                } else {
+                    List {
+                        if !workspace.pendingSuggestions.isEmpty {
+                            Section {
+                                InlineStatRow(
+                                    primary: "\(workspace.pendingSuggestions.count) pending",
+                                    secondary: "Accept useful links to make them part of the exported vocabulary graph."
+                                )
+                            }
+
+                            Section("Pending") {
+                                ForEach(workspace.pendingSuggestions, id: \.id) { connection in
+                                    SuggestionRow(
+                                        title: workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> "),
+                                        status: connection.status,
+                                        rationale: connection.rationale,
+                                        useWhen: connection.useWhen,
+                                        caution: connection.caution,
+                                        confidence: connection.confidence,
+                                        onAccept: { workspace.accept(connection) },
+                                        onDismiss: { workspace.dismiss(connection) },
+                                        onRestore: nil
+                                    )
+                                }
+                            }
+                        }
+
+                        if !workspace.reviewedSuggestions.isEmpty {
+                            Section("Reviewed") {
+                                ForEach(Array(workspace.reviewedSuggestions.prefix(18)), id: \.id) { connection in
+                                    SuggestionRow(
+                                        title: workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> "),
+                                        status: connection.status,
+                                        rationale: connection.rationale,
+                                        useWhen: connection.useWhen,
+                                        caution: connection.caution,
+                                        confidence: connection.confidence,
+                                        onAccept: connection.status == .dismissed ? { workspace.accept(connection) } : nil,
+                                        onDismiss: connection.status == .accepted ? { workspace.dismiss(connection) } : nil,
+                                        onRestore: { workspace.restore(connection) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.inset)
+                }
+            }
+            .navigationTitle("Suggestion Inbox")
+            .toolbar {
+                if workspace.isGeneratingSuggestions {
+                    ToolbarItem {
+                        ProgressView()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct LibraryTab: View {
+    @ObservedObject var workspace: EloqWorkspace
+
+    private var selectionBinding: Binding<UUID?> {
+        Binding(
+            get: { workspace.selectedWordID },
+            set: { workspace.selectedWordID = $0 }
+        )
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            if workspace.filteredWords().isEmpty {
+                UnavailableStateView(
+                    systemImage: "text.book.closed",
+                    title: "No Words Found",
+                    message: workspace.words.isEmpty
+                        ? "Save your first word on Home to start the library."
+                        : "Try a different search or library filter."
+                )
+            } else {
+                List(selection: selectionBinding) {
+                    ForEach(workspace.filteredWords(), id: \.id) { word in
+                        LibraryWordRow(
+                            word: word,
+                            roleSummary: workspace.roles(for: word).map { $0.kind.title }.joined(separator: " • "),
+                            connectionCount: workspace.connections(for: word).count
+                        )
+                        .tag(word.id)
+                    }
+                }
+                .listStyle(.sidebar)
+            }
+        } detail: {
+            if let selectedWord = workspace.selectedWord() {
+                WordDetailView(workspace: workspace, word: selectedWord)
+            } else {
+                UnavailableStateView(
+                    systemImage: "character.book.closed",
+                    title: "Select a Word",
+                    message: "Choose a word from the library to review connections, accept AI ideas, or link an opposite-side term manually."
+                )
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .searchable(text: $workspace.searchText, prompt: "Search words")
+        .toolbar {
+            ToolbarItem {
+                Picker("Filter", selection: $workspace.libraryFilter) {
+                    ForEach(LibraryFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 240)
+            }
+        }
+    }
+}
+
+private struct WordDetailView: View {
+    @ObservedObject var workspace: EloqWorkspace
+    let word: Word
+
+    private var roles: [WordRole] {
+        workspace.roles(for: word)
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                EloqPanel {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Suggestion Inbox")
-                            .font(.eloqDisplay(size: 28))
-                            .foregroundStyle(EloqPalette.ink)
+            VStack(alignment: .leading, spacing: 20) {
+                GroupBox {
+                    HStack(alignment: .top, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(word.displayTerm)
+                                .font(.largeTitle)
+                                .fontWeight(.semibold)
 
-                        Text(workspace.isGeneratingSuggestions
-                             ? "Generating suggestion rows for your latest addition…"
-                             : "Review AI-linked overused and underused pairs. Accept to publish them into the exported Eloq snapshot.")
-                            .font(.eloqBody(size: 14, weight: .medium))
-                            .foregroundStyle(EloqPalette.mutedInk)
-                    }
-                }
+                            if !roles.isEmpty {
+                                FlowRoleBadges(kinds: roles.map { $0.kind })
+                            }
 
-                if workspace.pendingSuggestions.isEmpty {
-                    EloqPanel {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("No suggestions to review")
-                                .font(.eloqDisplay(size: 24))
-                                .foregroundStyle(EloqPalette.ink)
-                            Text("Add a word or import Audora vocabulary and Eloq will queue AI-discovered connections here.")
-                                .font(.eloqBody(size: 14, weight: .medium))
-                                .foregroundStyle(EloqPalette.mutedInk)
+                            if !word.notes.isEmpty {
+                                DetailLine(label: "Notes", text: word.notes)
+                            }
+
+                            if !word.contexts.isEmpty {
+                                DetailLine(label: "Contexts", text: word.contexts.joined(separator: ", "))
+                            }
+                        }
+
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 8) {
+                            MetricCallout(title: "Total Links", value: "\(workspace.connections(for: word).count)")
+                            MetricCallout(
+                                title: "Accepted",
+                                value: "\(workspace.connections(for: word).filter { $0.status == .accepted }.count)"
+                            )
                         }
                     }
+                } label: {
+                    Label("Word Overview", systemImage: "character.book.closed")
+                }
+
+                if let overusedRole = roles.first(where: { $0.kind == .overused }),
+                   let underusedRole = roles.first(where: { $0.kind == .underused }) {
+                    HStack(alignment: .top, spacing: 16) {
+                        RoleConnectionPanel(workspace: workspace, focusWord: word, focusKind: overusedRole.kind)
+                        RoleConnectionPanel(workspace: workspace, focusWord: word, focusKind: underusedRole.kind)
+                    }
+                } else if let onlyRole = roles.first {
+                    RoleConnectionPanel(workspace: workspace, focusWord: word, focusKind: onlyRole.kind)
                 } else {
-                    ForEach(workspace.pendingSuggestions, id: \.id) { connection in
-                        SuggestionCard(
-                            title: workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> "),
-                            status: connection.status,
-                            rationale: connection.rationale,
-                            useWhen: connection.useWhen,
-                            caution: connection.caution,
-                            confidence: connection.confidence,
-                            onAccept: { workspace.accept(connection) },
-                            onDismiss: { workspace.dismiss(connection) },
-                            onRestore: nil
-                        )
-                    }
-                }
-
-                if !workspace.reviewedSuggestions.isEmpty {
-                    EloqPanel {
-                        VStack(alignment: .leading, spacing: 14) {
-                            Text("Reviewed")
-                                .font(.eloqDisplay(size: 22))
-                                .foregroundStyle(EloqPalette.ink)
-
-                            ForEach(Array(workspace.reviewedSuggestions.prefix(8)), id: \.id) { connection in
-                                SuggestionCard(
-                                    title: workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> "),
-                                    status: connection.status,
-                                    rationale: connection.rationale,
-                                    useWhen: connection.useWhen,
-                                    caution: connection.caution,
-                                    confidence: connection.confidence,
-                                    onAccept: connection.status == .dismissed ? { workspace.accept(connection) } : nil,
-                                    onDismiss: connection.status == .accepted ? { workspace.dismiss(connection) } : nil,
-                                    onRestore: { workspace.restore(connection) }
-                                )
-                            }
-                        }
-                    }
+                    UnavailableStateView(
+                        systemImage: "link.badge.plus",
+                        title: "No Roles Yet",
+                        message: "This word exists in storage but is not currently assigned to an overused or underused side."
+                    )
                 }
             }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .navigationTitle(word.displayTerm)
     }
 }
 
-private struct LibraryScreen: View {
+private struct RoleConnectionPanel: View {
     @ObservedObject var workspace: EloqWorkspace
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 18) {
-            EloqPanel {
-                VStack(alignment: .leading, spacing: 16) {
-                    HStack(spacing: 12) {
-                        TextField("Search words", text: $workspace.searchText)
-                            .textFieldStyle(.plain)
-                            .font(.eloqBody(size: 13, weight: .medium))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .fill(EloqPalette.panelStrong)
-                            )
-
-                        Picker("Filter", selection: $workspace.libraryFilter) {
-                            ForEach(LibraryFilter.allCases) { filter in
-                                Text(filter.title).tag(filter)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 280)
-                    }
-
-                    List(selection: Binding(
-                        get: { workspace.selectedWordID },
-                        set: { newValue in workspace.selectedWordID = newValue }
-                    )) {
-                        ForEach(workspace.filteredWords(), id: \.id) { word in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(word.displayTerm)
-                                    .font(.eloqBody(size: 14, weight: .semibold))
-                                Text(workspace.roles(for: word).map { $0.kind.title }.joined(separator: " · "))
-                                    .font(.eloqBody(size: 12, weight: .medium))
-                                    .foregroundStyle(EloqPalette.mutedInk)
-                            }
-                            .padding(.vertical, 4)
-                            .tag(word.id)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.clear)
-                }
-            }
-            .frame(width: 360)
-
-            if let selectedWord = workspace.selectedWord() {
-                EloqPanel {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(selectedWord.displayTerm)
-                            .font(.eloqDisplay(size: 34))
-                            .foregroundStyle(EloqPalette.ink)
-
-                        HStack(spacing: 8) {
-                            ForEach(workspace.roles(for: selectedWord), id: \.id) { role in
-                                Text(role.kind.title)
-                                    .font(.eloqBody(size: 11, weight: .bold))
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(role.kind == .underused ? EloqPalette.accent.opacity(0.2) : EloqPalette.warn.opacity(0.18)))
-                            }
-                        }
-
-                        if !selectedWord.notes.isEmpty {
-                            Text(selectedWord.notes)
-                                .font(.eloqBody(size: 14, weight: .medium))
-                                .foregroundStyle(EloqPalette.mutedInk)
-                        }
-
-                        ForEach(workspace.roles(for: selectedWord), id: \.id) { role in
-                            RoleConnectionBuilderSection(
-                                workspace: workspace,
-                                word: selectedWord,
-                                focusKind: role.kind
-                            )
-                        }
-
-                        Text("Connections")
-                            .font(.eloqDisplay(size: 22))
-                            .foregroundStyle(EloqPalette.ink)
-
-                        if workspace.connections(for: selectedWord).isEmpty {
-                            Text("No accepted or suggested links yet.")
-                                .font(.eloqBody(size: 14, weight: .medium))
-                                .foregroundStyle(EloqPalette.mutedInk)
-                        } else {
-                            ForEach(workspace.connections(for: selectedWord), id: \.id) { connection in
-                                SuggestionCard(
-                                    title: workspace.connectionTitle(connection).replacingOccurrences(of: "->", with: " -> "),
-                                    status: connection.status,
-                                    rationale: connection.rationale,
-                                    useWhen: connection.useWhen,
-                                    caution: connection.caution,
-                                    confidence: connection.confidence,
-                                    onAccept: connection.status == .suggested || connection.status == .dismissed ? { workspace.accept(connection) } : nil,
-                                    onDismiss: connection.status != .dismissed ? { workspace.dismiss(connection) } : nil,
-                                    onRestore: connection.status != .suggested ? { workspace.restore(connection) } : nil
-                                )
-                            }
-                        }
-                    }
-                }
-            } else {
-                EloqPanel {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Select a word")
-                            .font(.eloqDisplay(size: 28))
-                            .foregroundStyle(EloqPalette.ink)
-                        Text("The library stays intentionally spare: choose a word to inspect both sides of its graph and the AI suggestions attached to it.")
-                            .font(.eloqBody(size: 14, weight: .medium))
-                            .foregroundStyle(EloqPalette.mutedInk)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct RoleConnectionBuilderSection: View {
-    @ObservedObject var workspace: EloqWorkspace
-    let word: Word
+    let focusWord: Word
     let focusKind: WordRoleKind
-
     @State private var manualCounterpart = ""
 
-    private var acceptedConnections: [WordConnection] {
-        workspace.scopedConnections(for: word, focusKind: focusKind)
-            .filter { $0.status == .accepted }
+    private var scopedConnections: [WordConnection] {
+        workspace.scopedConnections(for: focusWord, focusKind: focusKind)
     }
 
     private var suggestedConnections: [WordConnection] {
-        workspace.scopedConnections(for: word, focusKind: focusKind)
-            .filter { $0.status == .suggested }
+        scopedConnections.filter { $0.status == .suggested }
     }
 
     private var availableWords: [Word] {
-        workspace.availableOppositeWords(for: word, focusKind: focusKind)
+        workspace.availableOppositeWords(for: focusWord, focusKind: focusKind)
     }
 
-    private var sectionTitle: String {
-        focusKind == .overused ? "Underused Matches" : "Overused Counterweights"
+    private var title: String {
+        switch focusKind {
+        case .overused:
+            return "Sharper alternatives"
+        case .underused:
+            return "Words this can replace"
+        }
     }
 
-    private var sectionCopy: String {
-        focusKind == .overused
-            ? "Generate or select sharper underused replacements for this overused word."
-            : "Generate or select overused defaults that this stronger word should replace."
+    private var helperText: String {
+        switch focusKind {
+        case .overused:
+            return "Generate underused words that help you stop leaning on “\(focusWord.displayTerm)”."
+        case .underused:
+            return "Generate overused words that “\(focusWord.displayTerm)” should be connected against."
+        }
     }
 
-    private var addButtonTitle: String {
-        focusKind == .overused ? "Add Underused Link" : "Add Overused Link"
+    private var chipTitle: String {
+        switch focusKind {
+        case .overused:
+            return "Tap to accept AI alternatives"
+        case .underused:
+            return "Tap to accept AI source words"
+        }
     }
 
-    private var textFieldPlaceholder: String {
-        focusKind == .overused ? "specific alternative" : "default wording"
+    private var manualPlaceholder: String {
+        switch focusKind {
+        case .overused:
+            return "Add a new underused word"
+        case .underused:
+            return "Add a new overused word"
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(sectionTitle)
-                        .font(.eloqDisplay(size: 22))
-                        .foregroundStyle(EloqPalette.ink)
+        GroupBox {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title)
+                            .font(.title3)
+                            .fontWeight(.semibold)
 
-                    Text(sectionCopy)
-                        .font(.eloqBody(size: 13, weight: .medium))
-                        .foregroundStyle(EloqPalette.mutedInk)
+                        Text(helperText)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Generate AI Ideas") {
+                        workspace.requestSuggestions(for: focusWord, focusKind: focusKind)
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
 
-                Spacer()
-
-                Button {
-                    workspace.requestSuggestions(for: word, focusKind: focusKind)
-                } label: {
-                    Label(workspace.isGeneratingSuggestions ? "Generating…" : "Generate AI Ideas", systemImage: "sparkles")
+                if workspace.isGeneratingSuggestions {
+                    ProgressView()
                 }
-                .buttonStyle(EloqSecondaryButtonStyle())
-                .disabled(workspace.isGeneratingSuggestions || !workspace.hasOpenAIKey)
-            }
 
-            if !acceptedConnections.isEmpty {
-                connectionTagRow(
-                    title: "Linked",
-                    connections: acceptedConnections,
-                    fill: EloqPalette.accent.opacity(0.18),
-                    stroke: EloqPalette.accent.opacity(0.32),
-                    selectOnTap: true,
-                    acceptOnTap: false
-                )
-            }
-
-            if !suggestedConnections.isEmpty {
-                connectionTagRow(
-                    title: "AI Ideas",
-                    connections: suggestedConnections,
-                    fill: Color.orange.opacity(0.16),
-                    stroke: Color.orange.opacity(0.3),
-                    selectOnTap: false,
-                    acceptOnTap: true
-                )
-            } else {
-                Text(workspace.hasOpenAIKey
-                     ? "No AI ideas yet. Generate suggestions here without leaving the library."
-                     : "Save an OpenAI key on Home to generate AI suggestions from the library.")
-                    .font(.eloqBody(size: 12, weight: .medium))
-                    .foregroundStyle(EloqPalette.subtleInk)
-            }
-
-            if !availableWords.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    tagSectionLabel("Connect From Library")
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(availableWords, id: \.id) { counterpart in
-                                Button {
-                                    _ = workspace.connectCounterpart(
-                                        focusWord: word,
-                                        focusKind: focusKind,
-                                        counterpartWord: counterpart
-                                    )
-                                } label: {
-                                    LibraryTag(
-                                        text: counterpart.displayTerm,
-                                        detail: focusKind.opposite.title,
-                                        fill: EloqPalette.panelStrong,
-                                        stroke: EloqPalette.stroke
-                                    )
+                if !suggestedConnections.isEmpty {
+                    ConnectionChipRow(title: chipTitle) {
+                        ForEach(suggestedConnections, id: \.id) { connection in
+                            if let counterpart = workspace.counterpartWord(for: connection, focusKind: focusKind) {
+                                Button(counterpart.displayTerm) {
+                                    workspace.accept(connection)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.borderedProminent)
                             }
                         }
                     }
                 }
-            }
 
-            VStack(alignment: .leading, spacing: 10) {
-                tagSectionLabel("Add Custom")
-
-                HStack(spacing: 10) {
-                    TextField(textFieldPlaceholder, text: $manualCounterpart)
-                        .textFieldStyle(.plain)
-                        .font(.eloqBody(size: 13, weight: .medium))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(EloqPalette.panelStrong)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(EloqPalette.stroke, lineWidth: 1)
-                        )
-
-                    Button(addButtonTitle) {
-                        if workspace.createLibraryConnection(
-                            focusWord: word,
-                            focusKind: focusKind,
-                            counterpartText: manualCounterpart
-                        ) {
-                            manualCounterpart = ""
-                        }
-                    }
-                    .buttonStyle(EloqPrimaryButtonStyle())
-                }
-            }
-        }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(EloqPalette.panelStrong.opacity(0.6))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(EloqPalette.stroke, lineWidth: 1)
-        )
-    }
-
-    private func connectionTagRow(
-        title: String,
-        connections: [WordConnection],
-        fill: Color,
-        stroke: Color,
-        selectOnTap: Bool,
-        acceptOnTap: Bool
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            tagSectionLabel(title)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(connections, id: \.id) { connection in
-                        if let counterpart = workspace.counterpartWord(for: connection, focusKind: focusKind) {
-                            Button {
-                                if acceptOnTap {
-                                    workspace.accept(connection)
-                                } else if selectOnTap {
-                                    workspace.selectWord(counterpart)
-                                }
-                            } label: {
-                                LibraryTag(
-                                    text: counterpart.displayTerm,
-                                    detail: acceptOnTap ? "\(Int(connection.confidence * 100))% · Accept" : "Connected",
-                                    fill: fill,
-                                    stroke: stroke
+                if !availableWords.isEmpty {
+                    ConnectionChipRow(title: "Connect a word already in your library") {
+                        ForEach(Array(availableWords.prefix(18)), id: \.id) { candidate in
+                            Button(candidate.displayTerm) {
+                                _ = workspace.connectCounterpart(
+                                    focusWord: focusWord,
+                                    focusKind: focusKind,
+                                    counterpartWord: candidate
                                 )
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+
+                HStack {
+                    TextField(manualPlaceholder, text: $manualCounterpart)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            createManualConnection()
+                        }
+
+                    Button("Connect") {
+                        createManualConnection()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(manualCounterpart.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+
+                Divider()
+
+                if scopedConnections.isEmpty {
+                    Text("No links for this side yet.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(scopedConnections, id: \.id) { connection in
+                            SuggestionRow(
+                                title: workspace.counterpartWord(for: connection, focusKind: focusKind)?.displayTerm ?? "Linked word",
+                                status: connection.status,
+                                rationale: connection.rationale,
+                                useWhen: connection.useWhen,
+                                caution: connection.caution,
+                                confidence: connection.confidence,
+                                onAccept: connection.status == .suggested || connection.status == .dismissed
+                                    ? { workspace.accept(connection) }
+                                    : nil,
+                                onDismiss: connection.status != .dismissed
+                                    ? { workspace.dismiss(connection) }
+                                    : nil,
+                                onRestore: connection.status != .suggested
+                                    ? { workspace.restore(connection) }
+                                    : nil
+                            )
+
+                            if connection.id != scopedConnections.last?.id {
+                                Divider()
+                            }
                         }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label(focusKind.title, systemImage: focusKind == .overused ? "arrow.turn.down.right" : "arrow.turn.up.left")
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private func tagSectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.eloqBody(size: 10, weight: .bold))
-            .tracking(1.2)
-            .foregroundStyle(EloqPalette.subtleInk)
+    private func createManualConnection() {
+        if workspace.createLibraryConnection(
+            focusWord: focusWord,
+            focusKind: focusKind,
+            counterpartText: manualCounterpart
+        ) {
+            manualCounterpart = ""
+        }
     }
 }
 
-private struct LibraryTag: View {
-    let text: String
-    let detail: String
-    let fill: Color
-    let stroke: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(text)
-                .font(.eloqBody(size: 12, weight: .semibold))
-                .foregroundStyle(EloqPalette.ink)
-                .lineLimit(1)
-
-            Text(detail)
-                .font(.eloqBody(size: 10, weight: .medium))
-                .foregroundStyle(EloqPalette.mutedInk)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(fill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(stroke, lineWidth: 1)
-        )
-    }
-}
-
-private struct SuggestionCard: View {
+private struct SuggestionRow: View {
     let title: String
     let status: SuggestionStatus
     let rationale: String
@@ -861,183 +640,316 @@ private struct SuggestionCard: View {
     let onRestore: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title)
-                        .font(.eloqBody(size: 15, weight: .semibold))
-                        .foregroundStyle(EloqPalette.ink)
-                    Text(rationale)
-                        .font(.eloqBody(size: 13, weight: .medium))
-                        .foregroundStyle(EloqPalette.mutedInk)
-                }
+                Text(title)
+                    .font(.headline)
 
                 Spacer()
 
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text(status.title)
-                        .font(.eloqBody(size: 11, weight: .bold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(status.color.opacity(0.18)))
+                HStack(spacing: 10) {
+                    Label(status.title, systemImage: status.symbolName)
+                        .font(.caption)
+                        .foregroundStyle(status.tintColor)
+
                     Text("\(Int(confidence * 100))%")
-                        .font(.eloqBody(size: 11, weight: .bold))
-                        .foregroundStyle(EloqPalette.subtleInk)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                detailLine("Use when", useWhen)
-                detailLine("Caution", caution)
+            if !rationale.isEmpty {
+                Text(rationale)
+                    .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 10) {
+            DetailLine(label: "Use When", text: useWhen)
+            DetailLine(label: "Caution", text: caution)
+
+            HStack {
                 if let onAccept {
                     Button("Accept", action: onAccept)
-                        .buttonStyle(EloqPrimaryButtonStyle())
+                        .buttonStyle(.borderedProminent)
                 }
+
                 if let onDismiss {
                     Button("Dismiss", action: onDismiss)
-                        .buttonStyle(EloqSecondaryButtonStyle())
+                        .buttonStyle(.bordered)
                 }
+
                 if let onRestore {
                     Button("Restore", action: onRestore)
-                        .buttonStyle(EloqSecondaryButtonStyle())
+                        .buttonStyle(.bordered)
                 }
             }
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(EloqPalette.panel)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(EloqPalette.stroke, lineWidth: 1)
-        )
+        .padding(.vertical, 10)
     }
+}
 
-    private func detailLine(_ label: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased())
-                .font(.eloqBody(size: 10, weight: .bold))
-                .tracking(1.2)
-                .foregroundStyle(EloqPalette.subtleInk)
-            Text(text)
-                .font(.eloqBody(size: 13, weight: .medium))
-                .foregroundStyle(EloqPalette.ink)
+private struct HealthSummaryView: View {
+    let health: HealthStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(health.title, systemImage: health.level.symbolName)
+                .foregroundStyle(health.level.tintColor)
+
+            Text(health.detail)
+                .foregroundStyle(.secondary)
+
+            if let lastExportAt = health.lastExportAt {
+                Text("Last export: \(lastExportAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let lastAIError = health.lastAIError, !lastAIError.isEmpty {
+                DetailLine(label: "AI", text: lastAIError)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MetricPanel: View {
+    let title: String
+    let value: String
+    let detail: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+
+            Text(value)
+                .font(.system(size: 30, weight: .semibold))
+                .monospacedDigit()
+
+            Text(detail)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+private struct MetricCallout: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3)
+                .fontWeight(.semibold)
+                .monospacedDigit()
         }
     }
 }
 
-private struct EloqPanel<Content: View>: View {
-    @ViewBuilder var content: Content
+private struct LibraryWordRow: View {
+    let word: Word
+    let roleSummary: String
+    let connectionCount: Int
 
     var body: some View {
-        content
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(EloqPalette.panel)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(EloqPalette.stroke, lineWidth: 1)
-            )
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(word.displayTerm)
+                    .font(.headline)
+
+                if !roleSummary.isEmpty {
+                    Text(roleSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            if connectionCount > 0 {
+                Text("\(connectionCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.quaternary, in: Capsule())
+                    .monospacedDigit()
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
-private struct EloqPrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.eloqBody(size: 13, weight: .semibold))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .foregroundStyle(Color.white)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(EloqPalette.accent.opacity(configuration.isPressed ? 0.8 : 1))
-            )
+private struct FlowRoleBadges: View {
+    let kinds: [WordRoleKind]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(kinds) { kind in
+                    Text(kind.title)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.quaternary, in: Capsule())
+                }
+            }
+        }
     }
 }
 
-private struct EloqSecondaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.eloqBody(size: 13, weight: .semibold))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .foregroundStyle(EloqPalette.ink)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(EloqPalette.panelStrong.opacity(configuration.isPressed ? 0.75 : 1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(EloqPalette.stroke, lineWidth: 1)
-            )
+private struct ConnectionChipRow<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.medium)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    content
+                }
+                .padding(.vertical, 2)
+            }
+        }
     }
 }
 
-private enum EloqPalette {
-    static let canvas = Color(hex: 0x101316)
-    static let panel = Color(hex: 0x171B20)
-    static let panelStrong = Color(hex: 0x1D232A)
-    static let ink = Color(hex: 0xF5F0E8)
-    static let mutedInk = Color(hex: 0xB8B2A8)
-    static let subtleInk = Color(hex: 0x857E72)
-    static let stroke = Color.white.opacity(0.08)
-    static let accent = Color(hex: 0x7FAE8B)
-    static let warn = Color(hex: 0xB26A56)
+private struct InlineStatRow: View {
+    let primary: String
+    let secondary: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(primary)
+                .font(.headline)
+                .monospacedDigit()
+            Text(secondary)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
 }
 
-private extension HealthLevel {
-    var color: Color {
-        switch self {
-        case .healthy:
-            return EloqPalette.accent
-        case .partial:
-            return Color.orange
-        case .error:
-            return Color.red.opacity(0.8)
+private struct BannerStrip: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+
+            Text(message)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.55))
+    }
+}
+
+private struct UnavailableStateView: View {
+    let systemImage: String
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+
+            Text(title)
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            Text(message)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 420)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(32)
+    }
+}
+
+private struct DetailLine: View {
+    let label: String
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(text)
         }
     }
 }
 
 private extension SuggestionStatus {
-    var color: Color {
+    var symbolName: String {
         switch self {
         case .suggested:
-            return Color.orange
+            return "sparkles"
         case .accepted:
-            return EloqPalette.accent
+            return "checkmark.circle.fill"
         case .dismissed:
-            return EloqPalette.warn
+            return "minus.circle.fill"
+        }
+    }
+
+    var tintColor: Color {
+        switch self {
+        case .suggested:
+            return .orange
+        case .accepted:
+            return .green
+        case .dismissed:
+            return .secondary
         }
     }
 }
 
-private extension Font {
-    static func eloqDisplay(size: CGFloat) -> Font {
-        .custom("New York", size: size, relativeTo: .title)
+private extension HealthLevel {
+    var symbolName: String {
+        switch self {
+        case .healthy:
+            return "checkmark.circle.fill"
+        case .partial:
+            return "exclamationmark.triangle.fill"
+        case .error:
+            return "xmark.octagon.fill"
+        }
     }
 
-    static func eloqBody(size: CGFloat, weight: Font.Weight) -> Font {
-        .system(size: size, weight: weight, design: .default)
-    }
-}
-
-private extension Color {
-    init(hex: UInt64) {
-        self.init(
-            .sRGB,
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255,
-            opacity: 1
-        )
+    var tintColor: Color {
+        switch self {
+        case .healthy:
+            return .green
+        case .partial:
+            return .orange
+        case .error:
+            return .red
+        }
     }
 }
 
@@ -1049,5 +961,6 @@ private extension Color {
     ])
     let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
     let container = try! ModelContainer(for: schema, configurations: [configuration])
-    ContentView(workspace: EloqWorkspace(modelContext: container.mainContext))
+
+    ContentView(workspace: EloqWorkspace(modelContext: container.mainContext, registerHotKey: false))
 }
