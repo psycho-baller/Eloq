@@ -1,32 +1,44 @@
-//
-//  EloqApp.swift
-//  Eloq
-//
-//  Created by Rami Maalouf on 2026-03-20.
-//
-
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 @main
 struct EloqApp: App {
-    var sharedModelContainer: ModelContainer = {
+    private let sharedModelContainer: ModelContainer
+    @StateObject private var workspace: EloqWorkspace
+
+    init() {
         let schema = Schema([
-            Item.self,
+            Word.self,
+            WordRole.self,
+            WordConnection.self,
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let container = try ModelContainer(for: schema, configurations: [configuration])
+            sharedModelContainer = container
+            _workspace = StateObject(wrappedValue: EloqWorkspace(modelContext: container.mainContext))
         } catch {
-            fatalError("Could not create ModelContainer: \(error)")
+            fatalError("Could not create Eloq ModelContainer: \(error)")
         }
-    }()
+    }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(workspace: workspace)
         }
         .modelContainer(sharedModelContainer)
+        .commands {
+            CommandMenu("Capture") {
+                Button("Capture Selection") {
+                    workspace.captureSelectionIntoDraft()
+                }
+                .keyboardShortcut("L", modifiers: [.command, .option, .control])
+
+                Button("Request Accessibility Access") {
+                    workspace.requestAccessibilityAccess()
+                }
+            }
+        }
     }
 }
