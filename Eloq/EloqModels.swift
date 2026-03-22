@@ -82,6 +82,8 @@ final class Word {
     var id: UUID
     var displayTerm: String
     var notes: String
+    var sourceExcerpt: String = ""
+    var exampleUsage: String = ""
     var contextsBlob: String
     var provenance: String
     var createdAt: Date
@@ -91,6 +93,8 @@ final class Word {
         displayTerm: String,
         normalizedTerm: String,
         notes: String = "",
+        sourceExcerpt: String = "",
+        exampleUsage: String = "",
         contexts: [String] = [],
         provenance: String = "user",
         createdAt: Date = .now
@@ -99,6 +103,8 @@ final class Word {
         self.displayTerm = displayTerm
         self.normalizedTerm = normalizedTerm
         self.notes = notes
+        self.sourceExcerpt = sourceExcerpt
+        self.exampleUsage = exampleUsage
         contextsBlob = Word.encodeContexts(contexts)
         self.provenance = provenance
         self.createdAt = createdAt
@@ -173,6 +179,8 @@ final class WordConnection {
     var rationale: String
     var useWhen: String
     var caution: String
+    var sourceExcerpt: String = ""
+    var exampleUsage: String = ""
     var confidence: Double
     var createdAt: Date
     var updatedAt: Date
@@ -185,6 +193,8 @@ final class WordConnection {
         rationale: String,
         useWhen: String,
         caution: String,
+        sourceExcerpt: String = "",
+        exampleUsage: String = "",
         confidence: Double,
         createdAt: Date = .now
     ) {
@@ -197,6 +207,8 @@ final class WordConnection {
         self.rationale = rationale
         self.useWhen = useWhen
         self.caution = caution
+        self.sourceExcerpt = sourceExcerpt
+        self.exampleUsage = exampleUsage
         self.confidence = confidence
         self.createdAt = createdAt
         updatedAt = createdAt
@@ -246,6 +258,8 @@ struct SnapshotWord: Codable, Equatable, Identifiable {
     var normalizedTerm: String
     var roles: [String]
     var notes: String
+    var sourceExcerpt: String
+    var exampleUsage: String
     var contexts: [String]
     var provenance: String
 }
@@ -261,6 +275,8 @@ struct SnapshotConnection: Codable, Equatable, Identifiable {
     var rationale: String
     var useWhen: String
     var caution: String
+    var sourceExcerpt: String
+    var exampleUsage: String
     var confidence: Double
 }
 
@@ -297,12 +313,27 @@ struct LegacyWritingAwarenessState: Decodable {
     }
 }
 
+enum SuggestedCounterpartSource: String, Codable, Equatable {
+    case library
+    case generated
+
+    var title: String {
+        switch self {
+        case .library:
+            return "In Library"
+        case .generated:
+            return "New AI"
+        }
+    }
+}
+
 struct SuggestionCandidate: Codable, Equatable, Hashable, Identifiable {
     var id: String { counterpartTerm }
     var counterpartTerm: String
     var rationale: String
     var useWhen: String
     var caution: String
+    var exampleUsage: String
     var confidence: Double
 }
 
@@ -314,9 +345,12 @@ struct ConnectionSuggestion: Equatable, Identifiable {
     var focusKind: WordRoleKind
     var counterpartTerm: String
     var counterpartNormalizedTerm: String
+    var counterpartSource: SuggestedCounterpartSource
     var rationale: String
     var useWhen: String
     var caution: String
+    var sourceExcerpt: String
+    var exampleUsage: String
     var confidence: Double
     var status: SuggestionStatus
     var createdAt: Date
@@ -330,9 +364,12 @@ struct ConnectionSuggestion: Equatable, Identifiable {
         focusKind: WordRoleKind,
         counterpartTerm: String,
         counterpartNormalizedTerm: String,
+        counterpartSource: SuggestedCounterpartSource = .generated,
         rationale: String,
         useWhen: String,
         caution: String,
+        sourceExcerpt: String = "",
+        exampleUsage: String = "",
         confidence: Double,
         status: SuggestionStatus = .suggested,
         createdAt: Date = .now,
@@ -345,9 +382,12 @@ struct ConnectionSuggestion: Equatable, Identifiable {
         self.focusKind = focusKind
         self.counterpartTerm = counterpartTerm
         self.counterpartNormalizedTerm = counterpartNormalizedTerm
+        self.counterpartSource = counterpartSource
         self.rationale = rationale
         self.useWhen = useWhen
         self.caution = caution
+        self.sourceExcerpt = sourceExcerpt
+        self.exampleUsage = exampleUsage
         self.confidence = confidence
         self.status = status
         self.createdAt = createdAt

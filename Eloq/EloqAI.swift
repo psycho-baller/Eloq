@@ -28,15 +28,56 @@ struct OpenAISuggestionService: Sendable {
     private let endpoint = URL(string: "https://api.openai.com/v1/responses")!
     private let model: String
     private let reasoningEffort: String
+    private let apiKeyProvider: @MainActor @Sendable () -> String?
 
     nonisolated init(
         session: URLSession = .shared,
         model: String = "gpt-5-mini",
-        reasoningEffort: String = "low"
+        reasoningEffort: String = "low",
+        apiKeyProvider: @escaping @MainActor @Sendable () -> String? = {
+            EloqKeychain.shared.openAIKey()
+        }
     ) {
         self.session = session
         self.model = model
         self.reasoningEffort = reasoningEffort
+        self.apiKeyProvider = apiKeyProvider
+    }
+
+    static func oppositeKind(for focusKind: String) -> String {
+        focusKind == WordRoleKind.overused.rawValue
+            ? WordRoleKind.underused.rawValue
+            : WordRoleKind.overused.rawValue
+    }
+
+    static func directionGuidance(for focusRole: RoleSummary) -> String {
+        switch focusRole.kind {
+        case WordRoleKind.underused.rawValue:
+            return """
+            The focus word is underused. Suggest overused/default words or phrases people commonly fall back to instead of "\(focusRole.term)".
+            The counterpart terms should usually feel more generic, more habitual, or less precise than the focus word.
+            """
+        default:
+            return """
+            The focus word is overused. Suggest sharper underused words or phrases the user could reach for instead of "\(focusRole.term)".
+            The counterpart terms should usually feel more precise, more vivid, or more specific than the focus word.
+            """
+        }
+    }
+
+    static func mixGuidance(for oppositeLibraryTerms: [String]) -> String {
+        if oppositeLibraryTerms.isEmpty {
+            return """
+            The opposite-side library is empty, so fill the list with the best natural counterparts you can find.
+            """
+        }
+
+        return """
+        The UI already shows opposite-side library words separately. Complement that list instead of echoing it.
+        Return a mixed shortlist with mostly new counterpart terms that are not already in the opposite-side library.
+        Include no more than two library reuses unless there is no credible novel option.
+        Aim for at least three novel counterpart terms when possible.
+        """
     }
 
     func suggestConnections(
@@ -44,9 +85,15 @@ struct OpenAISuggestionService: Sendable {
         existingRoles: [RoleSummary],
         existingConnections: [ExistingConnectionSummary]
     ) async throws -> [SuggestionCandidate] {
-        guard let apiKey = EloqKeychain.shared.openAIKey(), !apiKey.isEmpty else {
+        guard let apiKey = apiKeyProvider()?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !apiKey.isEmpty else {
             throw AIServiceError.missingAPIKey
         }
+
+        let oppositeKind = Self.oppositeKind(for: focusRole.kind)
+        let oppositeLibraryTerms = existingRoles
+            .filter { $0.kind == oppositeKind }
+            .map(\.term)
 
         let systemPrompt = """
         You are Eloq, a linguistically conservative vocabulary coach.
@@ -55,12 +102,15 @@ struct OpenAISuggestionService: Sendable {
         - underused: sharper words they want to reach for more often
 
         Suggest opposite-side connections for the focus word.
+        \(Self.directionGuidance(for: focusRole))
         Prefer common, realistic writing substitutions over dramatic synonyms.
-        Reuse existing library words when possible.
+        Reuse existing library words sparingly and only when they are clearly the best fit.
+        \(Self.mixGuidance(for: oppositeLibraryTerms))
         If you introduce a new counterpart term, keep it to four words or fewer.
         Never return the focus term itself.
         Never return duplicate counterpart terms.
         Keep rationale, useWhen, and caution concise and practical.
+        Also provide one short example sentence that uses the counterpart term naturally.
         """
 
         let schema: [String: Any] = [
@@ -76,6 +126,7 @@ struct OpenAISuggestionService: Sendable {
                             "rationale": ["type": "string"],
                             "useWhen": ["type": "string"],
                             "caution": ["type": "string"],
+                            "exampleUsage": ["type": "string"],
                             "confidence": ["type": "number"],
                         ],
                         "required": [
@@ -83,6 +134,7 @@ struct OpenAISuggestionService: Sendable {
                             "rationale",
                             "useWhen",
                             "caution",
+                            "exampleUsage",
                             "confidence",
                         ],
                         "additionalProperties": false,
@@ -98,10 +150,12 @@ struct OpenAISuggestionService: Sendable {
                 "term": focusRole.term,
                 "kind": focusRole.kind,
             ],
+            "requestedCounterpartKind": oppositeKind,
             "library": [
                 "overused": existingRoles.filter { $0.kind == WordRoleKind.overused.rawValue }.map(\.term),
                 "underused": existingRoles.filter { $0.kind == WordRoleKind.underused.rawValue }.map(\.term),
             ],
+            "oppositeSideLibrary": oppositeLibraryTerms,
             "existingConnections": existingConnections.map {
                 [
                     "overused": $0.overused,

@@ -80,6 +80,9 @@ final class EloqWorkspace: ObservableObject {
         aiSuggestions
             .filter { $0.status == .suggested }
             .sorted { lhs, rhs in
+                if lhs.counterpartSource != rhs.counterpartSource {
+                    return lhs.counterpartSource == .generated
+                }
                 if lhs.confidence == rhs.confidence {
                     return lhs.title < rhs.title
                 }
@@ -229,6 +232,9 @@ final class EloqWorkspace: ObservableObject {
                 suggestion.status == .suggested
             }
             .sorted { lhs, rhs in
+                if lhs.counterpartSource != rhs.counterpartSource {
+                    return lhs.counterpartSource == .generated
+                }
                 if lhs.confidence == rhs.confidence {
                     return lhs.counterpartTerm.localizedCaseInsensitiveCompare(rhs.counterpartTerm) == .orderedAscending
                 }
@@ -299,7 +305,13 @@ final class EloqWorkspace: ObservableObject {
         quickAddText = ""
 
         Task {
-            await addWord(text: text, kind: mode, provenance: "user", context: "Quick Add")
+            await addWord(
+                text: text,
+                kind: mode,
+                provenance: "user",
+                context: "Quick Add",
+                sourceExcerpt: text
+            )
         }
     }
 
@@ -307,7 +319,8 @@ final class EloqWorkspace: ObservableObject {
         text: String,
         kind: WordRoleKind,
         provenance: String,
-        context: String
+        context: String,
+        sourceExcerpt: String? = nil
     ) async {
         guard let candidate = Normalization.candidateTerm(text) else {
             lastBanner = WorkspaceError.invalidWord.localizedDescription
@@ -315,7 +328,13 @@ final class EloqWorkspace: ObservableObject {
         }
 
         let normalized = Normalization.normalizedTerm(candidate)
-        let word = upsertWord(displayTerm: candidate, normalizedTerm: normalized, provenance: provenance, context: context)
+        let word = upsertWord(
+            displayTerm: candidate,
+            normalizedTerm: normalized,
+            provenance: provenance,
+            context: context,
+            sourceExcerpt: normalizedSourceExcerpt(sourceExcerpt ?? text, candidateTerm: candidate)
+        )
         if role(for: word, kind: kind) != nil {
             selectedWordID = word.id
             lastBanner = WorkspaceError.duplicateRole(word.displayTerm, kind).localizedDescription
@@ -363,7 +382,8 @@ final class EloqWorkspace: ObservableObject {
             displayTerm: suggestion.counterpartTerm,
             normalizedTerm: suggestion.counterpartNormalizedTerm,
             provenance: "ai",
-            context: ""
+            context: "",
+            exampleUsage: suggestion.exampleUsage
         )
         let counterpartRole = ensureRole(
             for: counterpartWord,
@@ -382,8 +402,15 @@ final class EloqWorkspace: ObservableObject {
             rationale: suggestion.rationale,
             useWhen: suggestion.useWhen,
             caution: suggestion.caution,
+            sourceExcerpt: suggestion.sourceExcerpt,
+            exampleUsage: suggestion.exampleUsage,
             confidence: suggestion.confidence,
             allowStatusOverride: true
+        )
+
+        seedReferenceDetails(
+            for: counterpartWord,
+            exampleUsage: suggestion.exampleUsage
         )
 
         do {
@@ -489,6 +516,8 @@ final class EloqWorkspace: ObservableObject {
                             rationale: rule.notes ?? "Imported from Audora.",
                             useWhen: option.useWhen ?? "Use the underused word when it is more precise than the default wording.",
                             caution: option.caution ?? "Skip it if the sentence becomes forced.",
+                            sourceExcerpt: "",
+                            exampleUsage: "",
                             confidence: 0.9
                         )
                         if created {
@@ -557,7 +586,7 @@ final class EloqWorkspace: ObservableObject {
         }
 
         Task {
-            await enrichConnections(for: focusRole)
+            await enrichConnections(for: focusRole, announceResult: true)
         }
     }
 
@@ -667,6 +696,8 @@ final class EloqWorkspace: ObservableObject {
             rationale: copy.rationale,
             useWhen: copy.useWhen,
             caution: copy.caution,
+            sourceExcerpt: copy.sourceExcerpt,
+            exampleUsage: copy.exampleUsage,
             confidence: 1,
             allowStatusOverride: true
         )
@@ -769,6 +800,8 @@ final class EloqWorkspace: ObservableObject {
                 normalizedTerm: word.normalizedTerm,
                 roles: roles(for: word).map { $0.kind.rawValue },
                 notes: word.notes,
+                sourceExcerpt: word.sourceExcerpt,
+                exampleUsage: word.exampleUsage,
                 contexts: word.contexts,
                 provenance: word.provenance
             )
@@ -795,6 +828,8 @@ final class EloqWorkspace: ObservableObject {
                 rationale: connection.rationale,
                 useWhen: connection.useWhen,
                 caution: connection.caution,
+                sourceExcerpt: connection.sourceExcerpt,
+                exampleUsage: connection.exampleUsage,
                 confidence: connection.confidence
             )
         }
@@ -817,7 +852,7 @@ final class EloqWorkspace: ObservableObject {
         )
     }
 
-    private func enrichConnections(for role: WordRole) async {
+    private func enrichConnections(for role: WordRole, announceResult: Bool = false) async {
         guard let focusWord = word(for: role) else {
             return
         }
@@ -871,15 +906,19 @@ final class EloqWorkspace: ObservableObject {
             )
 
             let stagedCount = stageAISuggestions(suggestions, for: focusWord, focusKind: role.kind)
+            let detail = stagedCount == 0
+                ? "No new opposite-side suggestions were generated for \"\(focusWord.displayTerm)\"."
+                : "Queued \(stagedCount) suggestion(s) for review on \"\(focusWord.displayTerm)\"."
             health = HealthStatus(
                 level: health.lastExportAt == nil ? .partial : .healthy,
                 title: "AI suggestions ready",
-                detail: stagedCount == 0
-                    ? "No new opposite-side suggestions were generated for \"\(focusWord.displayTerm)\"."
-                    : "Queued \(stagedCount) suggestion(s) for review on \"\(focusWord.displayTerm)\".",
+                detail: detail,
                 lastExportAt: health.lastExportAt,
                 lastAIError: nil
             )
+            if announceResult {
+                lastBanner = detail
+            }
         } catch {
             let detail = error.localizedDescription
             health = HealthStatus(
@@ -909,6 +948,7 @@ final class EloqWorkspace: ObservableObject {
                     rationale: suggestion.rationale,
                     useWhen: suggestion.useWhen,
                     caution: suggestion.caution,
+                    exampleUsage: suggestion.exampleUsage,
                     confidence: suggestion.confidence
                 ))
             },
@@ -918,6 +958,10 @@ final class EloqWorkspace: ObservableObject {
         var stagedCount = 0
 
         for (normalizedCounterpart, suggestion) in deduplicated.sorted(by: { $0.key < $1.key }) {
+            let counterpartSource = counterpartSuggestionSource(
+                normalizedCounterpart: normalizedCounterpart,
+                focusKind: focusKind
+            )
             let pairKey = connectionKey(
                 focusNormalizedTerm: focusWord.normalizedTerm,
                 focusKind: focusKind,
@@ -932,9 +976,12 @@ final class EloqWorkspace: ObservableObject {
                 if aiSuggestions[existingIndex].status == .suggested {
                     aiSuggestions[existingIndex].counterpartTerm = suggestion.counterpartTerm
                     aiSuggestions[existingIndex].counterpartNormalizedTerm = normalizedCounterpart
+                    aiSuggestions[existingIndex].counterpartSource = counterpartSource
                     aiSuggestions[existingIndex].rationale = suggestion.rationale
                     aiSuggestions[existingIndex].useWhen = suggestion.useWhen
                     aiSuggestions[existingIndex].caution = suggestion.caution
+                    aiSuggestions[existingIndex].sourceExcerpt = focusWord.sourceExcerpt
+                    aiSuggestions[existingIndex].exampleUsage = suggestion.exampleUsage
                     aiSuggestions[existingIndex].confidence = min(max(suggestion.confidence, 0), 1)
                     aiSuggestions[existingIndex].updatedAt = .now
                     stagedCount += 1
@@ -950,9 +997,12 @@ final class EloqWorkspace: ObservableObject {
                     focusKind: focusKind,
                     counterpartTerm: suggestion.counterpartTerm,
                     counterpartNormalizedTerm: normalizedCounterpart,
+                    counterpartSource: counterpartSource,
                     rationale: suggestion.rationale,
                     useWhen: suggestion.useWhen,
                     caution: suggestion.caution,
+                    sourceExcerpt: focusWord.sourceExcerpt,
+                    exampleUsage: suggestion.exampleUsage,
                     confidence: min(max(suggestion.confidence, 0), 1)
                 )
             )
@@ -962,17 +1012,33 @@ final class EloqWorkspace: ObservableObject {
         return stagedCount
     }
 
+    private func counterpartSuggestionSource(
+        normalizedCounterpart: String,
+        focusKind: WordRoleKind
+    ) -> SuggestedCounterpartSource {
+        roles.contains { role in
+            role.kind == focusKind.opposite &&
+            role.wordNormalizedTerm == normalizedCounterpart
+        }
+            ? .library
+            : .generated
+    }
+
     private func upsertWord(
         displayTerm: String,
         normalizedTerm: String,
         provenance: String,
-        context: String
+        context: String,
+        sourceExcerpt: String = "",
+        exampleUsage: String = ""
     ) -> Word {
         upsertWordResult(
             displayTerm: displayTerm,
             normalizedTerm: normalizedTerm,
             provenance: provenance,
-            context: context
+            context: context,
+            sourceExcerpt: sourceExcerpt,
+            exampleUsage: exampleUsage
         ).word
     }
 
@@ -980,7 +1046,9 @@ final class EloqWorkspace: ObservableObject {
         displayTerm: String,
         normalizedTerm: String,
         provenance: String,
-        context: String
+        context: String,
+        sourceExcerpt: String = "",
+        exampleUsage: String = ""
     ) -> (word: Word, isNew: Bool) {
         if let existing = words.first(where: { $0.normalizedTerm == normalizedTerm }) {
             if !context.isEmpty, !existing.contexts.contains(context) {
@@ -989,6 +1057,11 @@ final class EloqWorkspace: ObservableObject {
             if existing.displayTerm != displayTerm {
                 existing.displayTerm = displayTerm
             }
+            seedReferenceDetails(
+                for: existing,
+                sourceExcerpt: sourceExcerpt,
+                exampleUsage: exampleUsage
+            )
             existing.updatedAt = .now
             return (existing, false)
         }
@@ -996,6 +1069,8 @@ final class EloqWorkspace: ObservableObject {
         let word = Word(
             displayTerm: displayTerm,
             normalizedTerm: normalizedTerm,
+            sourceExcerpt: sourceExcerpt,
+            exampleUsage: exampleUsage,
             contexts: context.isEmpty ? [] : [context],
             provenance: provenance
         )
@@ -1029,6 +1104,8 @@ final class EloqWorkspace: ObservableObject {
         rationale: String,
         useWhen: String,
         caution: String,
+        sourceExcerpt: String,
+        exampleUsage: String,
         confidence: Double,
         allowStatusOverride: Bool = false
     ) -> Bool {
@@ -1042,6 +1119,8 @@ final class EloqWorkspace: ObservableObject {
             existing.rationale = rationale
             existing.useWhen = useWhen
             existing.caution = caution
+            existing.sourceExcerpt = sourceExcerpt
+            existing.exampleUsage = exampleUsage
             existing.confidence = confidence
             existing.updatedAt = .now
             return false
@@ -1055,6 +1134,8 @@ final class EloqWorkspace: ObservableObject {
             rationale: rationale,
             useWhen: useWhen,
             caution: caution,
+            sourceExcerpt: sourceExcerpt,
+            exampleUsage: exampleUsage,
             confidence: confidence
         )
         modelContext.insert(connection)
@@ -1090,23 +1171,48 @@ final class EloqWorkspace: ObservableObject {
         suggestion.title
     }
 
+    func updateWordReferenceDetails(_ word: Word, sourceExcerpt: String, exampleUsage: String) {
+        let normalizedSourceExcerpt = normalizeReferenceText(sourceExcerpt)
+        let normalizedExampleUsage = normalizeReferenceText(exampleUsage)
+        if word.sourceExcerpt == normalizedSourceExcerpt, word.exampleUsage == normalizedExampleUsage {
+            lastBanner = "No reference details changed."
+            return
+        }
+
+        word.sourceExcerpt = normalizedSourceExcerpt
+        word.exampleUsage = normalizedExampleUsage
+        word.updatedAt = .now
+
+        do {
+            try saveAndRefresh()
+            scheduleExport()
+            lastBanner = "Updated excerpts for \"\(word.displayTerm)\"."
+        } catch {
+            lastBanner = error.localizedDescription
+        }
+    }
+
     private func manualConnectionCopy(
         focusWord: Word,
         focusKind: WordRoleKind,
         counterpartWord: Word
-    ) -> (rationale: String, useWhen: String, caution: String) {
+    ) -> (rationale: String, useWhen: String, caution: String, sourceExcerpt: String, exampleUsage: String) {
         switch focusKind {
         case .overused:
             return (
                 rationale: "Linked manually from the library.",
                 useWhen: "Reach for \"\(counterpartWord.displayTerm)\" when it says the idea more precisely than \"\(focusWord.displayTerm)\".",
-                caution: "Skip it if the sharper word changes the meaning or tone too much."
+                caution: "Skip it if the sharper word changes the meaning or tone too much.",
+                sourceExcerpt: focusWord.sourceExcerpt,
+                exampleUsage: counterpartWord.exampleUsage
             )
         case .underused:
             return (
                 rationale: "Linked manually from the library.",
                 useWhen: "Notice when \"\(focusWord.displayTerm)\" is a sharper alternative to defaulting to \"\(counterpartWord.displayTerm)\".",
-                caution: "Do not force the stronger word when the simpler wording is actually better."
+                caution: "Do not force the stronger word when the simpler wording is actually better.",
+                sourceExcerpt: focusWord.sourceExcerpt,
+                exampleUsage: focusWord.exampleUsage
             )
         }
     }
@@ -1158,6 +1264,36 @@ final class EloqWorkspace: ObservableObject {
         }
         aiSuggestions[index].status = status
         aiSuggestions[index].updatedAt = .now
+    }
+
+    private func seedReferenceDetails(
+        for word: Word,
+        sourceExcerpt: String = "",
+        exampleUsage: String = ""
+    ) {
+        let normalizedSourceExcerpt = normalizeReferenceText(sourceExcerpt)
+        let normalizedExampleUsage = normalizeReferenceText(exampleUsage)
+
+        if !normalizedSourceExcerpt.isEmpty, word.sourceExcerpt.isEmpty {
+            word.sourceExcerpt = normalizedSourceExcerpt
+        }
+
+        if !normalizedExampleUsage.isEmpty, word.exampleUsage.isEmpty {
+            word.exampleUsage = normalizedExampleUsage
+        }
+    }
+
+    private func normalizeReferenceText(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func normalizedSourceExcerpt(_ text: String, candidateTerm: String) -> String {
+        let trimmed = normalizeReferenceText(text)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+
+        return trimmed.caseInsensitiveCompare(candidateTerm) == .orderedSame ? "" : trimmed
     }
 
     private func connectionKey(

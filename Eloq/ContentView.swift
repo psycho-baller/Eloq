@@ -291,10 +291,13 @@ private struct InboxTab: View {
                                 ForEach(workspace.pendingSuggestions, id: \.id) { suggestion in
                                     SuggestionRow(
                                         title: workspace.connectionTitle(suggestion).replacingOccurrences(of: "->", with: " -> "),
+                                        counterpartSource: suggestion.counterpartSource,
                                         status: suggestion.status,
                                         rationale: suggestion.rationale,
                                         useWhen: suggestion.useWhen,
                                         caution: suggestion.caution,
+                                        sourceExcerpt: suggestion.sourceExcerpt,
+                                        exampleUsage: suggestion.exampleUsage,
                                         confidence: suggestion.confidence,
                                         onAccept: { workspace.accept(suggestion) },
                                         onDismiss: { workspace.dismiss(suggestion) },
@@ -309,10 +312,13 @@ private struct InboxTab: View {
                                 ForEach(Array(workspace.reviewedSuggestions.prefix(18)), id: \.id) { suggestion in
                                     SuggestionRow(
                                         title: workspace.connectionTitle(suggestion).replacingOccurrences(of: "->", with: " -> "),
+                                        counterpartSource: suggestion.counterpartSource,
                                         status: suggestion.status,
                                         rationale: suggestion.rationale,
                                         useWhen: suggestion.useWhen,
                                         caution: suggestion.caution,
+                                        sourceExcerpt: suggestion.sourceExcerpt,
+                                        exampleUsage: suggestion.exampleUsage,
                                         confidence: suggestion.confidence,
                                         onAccept: suggestion.status == .dismissed ? { workspace.accept(suggestion) } : nil,
                                         onDismiss: suggestion.status == .accepted ? { workspace.dismiss(suggestion) } : nil,
@@ -1026,9 +1032,16 @@ private struct WordDetailView: View {
     @ObservedObject var workspace: EloqWorkspace
     let word: Word
     @State private var isShowingDeleteConfirmation = false
+    @State private var sourceExcerptDraft = ""
+    @State private var exampleUsageDraft = ""
 
     private var roles: [WordRole] {
         workspace.roles(for: word)
+    }
+
+    private var hasReferenceChanges: Bool {
+        sourceExcerptDraft.trimmingCharacters(in: .whitespacesAndNewlines) != word.sourceExcerpt ||
+            exampleUsageDraft.trimmingCharacters(in: .whitespacesAndNewlines) != word.exampleUsage
     }
 
     var body: some View {
@@ -1052,6 +1065,14 @@ private struct WordDetailView: View {
                             if !word.contexts.isEmpty {
                                 DetailLine(label: "Contexts", text: word.contexts.joined(separator: ", "))
                             }
+
+                            if !word.sourceExcerpt.isEmpty {
+                                DetailLine(label: "Source Excerpt", text: word.sourceExcerpt)
+                            }
+
+                            if !word.exampleUsage.isEmpty {
+                                DetailLine(label: "Example", text: word.exampleUsage)
+                            }
                         }
 
                         Spacer()
@@ -1066,6 +1087,40 @@ private struct WordDetailView: View {
                     }
                 } label: {
                     Label("Word Overview", systemImage: "character.book.closed")
+                }
+
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ReferenceEditor(
+                            title: "Source excerpt",
+                            placeholder: "Paste the real sentence or excerpt where this word showed up.",
+                            text: $sourceExcerptDraft,
+                            minHeight: 96
+                        )
+
+                        ReferenceEditor(
+                            title: "Example usage",
+                            placeholder: "Store one clean example sentence you want to remember.",
+                            text: $exampleUsageDraft,
+                            minHeight: 84
+                        )
+
+                        HStack {
+                            Spacer()
+
+                            Button("Save reference details") {
+                                workspace.updateWordReferenceDetails(
+                                    word,
+                                    sourceExcerpt: sourceExcerptDraft,
+                                    exampleUsage: exampleUsageDraft
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!hasReferenceChanges)
+                        }
+                    }
+                } label: {
+                    Label("Source & Example", systemImage: "quote.opening")
                 }
 
                 if let overusedRole = roles.first(where: { $0.kind == .overused }),
@@ -1108,6 +1163,10 @@ private struct WordDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the word, its roles, linked connections, and any staged AI suggestions that mention it.")
+        }
+        .task(id: word.id) {
+            sourceExcerptDraft = word.sourceExcerpt
+            exampleUsageDraft = word.exampleUsage
         }
     }
 }
@@ -1245,10 +1304,13 @@ private struct RoleConnectionPanel: View {
                         ForEach(suggestedConnections, id: \.id) { suggestion in
                             SuggestionRow(
                                 title: suggestion.counterpartTerm,
+                                counterpartSource: suggestion.counterpartSource,
                                 status: suggestion.status,
                                 rationale: suggestion.rationale,
                                 useWhen: suggestion.useWhen,
                                 caution: suggestion.caution,
+                                sourceExcerpt: suggestion.sourceExcerpt,
+                                exampleUsage: suggestion.exampleUsage,
                                 confidence: suggestion.confidence,
                                 onAccept: { workspace.accept(suggestion) },
                                 onDismiss: { workspace.dismiss(suggestion) },
@@ -1263,10 +1325,13 @@ private struct RoleConnectionPanel: View {
                         ForEach(canonicalConnections, id: \.id) { connection in
                             SuggestionRow(
                                 title: workspace.counterpartWord(for: connection, focusKind: focusKind)?.displayTerm ?? "Linked word",
+                                counterpartSource: nil,
                                 status: connection.status,
                                 rationale: connection.rationale,
                                 useWhen: connection.useWhen,
                                 caution: connection.caution,
+                                sourceExcerpt: connection.sourceExcerpt,
+                                exampleUsage: connection.exampleUsage,
                                 confidence: connection.confidence,
                                 onAccept: connection.status == .suggested || connection.status == .dismissed
                                     ? { workspace.accept(connection) }
@@ -1306,10 +1371,13 @@ private struct RoleConnectionPanel: View {
 
 private struct SuggestionRow: View {
     let title: String
+    let counterpartSource: SuggestedCounterpartSource?
     let status: SuggestionStatus
     let rationale: String
     let useWhen: String
     let caution: String
+    let sourceExcerpt: String
+    let exampleUsage: String
     let confidence: Double
     let onAccept: (() -> Void)?
     let onDismiss: (() -> Void)?
@@ -1318,8 +1386,14 @@ private struct SuggestionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
-                Text(title)
-                    .font(.headline)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title)
+                        .font(.headline)
+
+                    if let counterpartSource {
+                        EloqChip(text: counterpartSource.title, tone: counterpartSource.chipTone)
+                    }
+                }
 
                 Spacer()
 
@@ -1340,7 +1414,16 @@ private struct SuggestionRow: View {
                     .foregroundStyle(.secondary)
             }
 
+            if !sourceExcerpt.isEmpty {
+                DetailLine(label: "Source Excerpt", text: sourceExcerpt)
+            }
+
             DetailLine(label: "Use When", text: useWhen)
+
+            if !exampleUsage.isEmpty {
+                DetailLine(label: "Example", text: exampleUsage)
+            }
+
             DetailLine(label: "Caution", text: caution)
 
             HStack {
@@ -1588,6 +1671,47 @@ private struct DetailLine: View {
     }
 }
 
+private struct ReferenceEditor: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+    let minHeight: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(EloqTheme.surfaceRaised)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(EloqTheme.border, lineWidth: 1)
+                    )
+
+                TextEditor(text: $text)
+                    .scrollContentBackground(.hidden)
+                    .font(.body)
+                    .foregroundStyle(EloqTheme.textPrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(minHeight: minHeight)
+
+                if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(placeholder)
+                        .foregroundStyle(EloqTheme.textSecondary)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 16)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(minHeight: minHeight)
+        }
+    }
+}
+
 private extension SuggestionStatus {
     var symbolName: String {
         switch self {
@@ -1608,6 +1732,17 @@ private extension SuggestionStatus {
             return EloqTheme.accent
         case .dismissed:
             return .secondary
+        }
+    }
+}
+
+private extension SuggestedCounterpartSource {
+    var chipTone: EloqChipTone {
+        switch self {
+        case .library:
+            return .neutral
+        case .generated:
+            return .accent
         }
     }
 }
