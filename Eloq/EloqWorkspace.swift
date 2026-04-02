@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import Network
 import SwiftData
 
 struct EloqStoragePaths {
@@ -22,6 +23,178 @@ struct EloqStoragePaths {
             audoraStateURL: audoraRoot.appendingPathComponent("state.json"),
             audoraSeedURL: audoraRoot.appendingPathComponent("seed.json")
         )
+    }
+}
+
+private enum EloqLocalBridgeConfiguration {
+    static let port: UInt16 = 43827
+    static let snapshotPath = "/snapshot"
+    static let snapshotURL = URL(string: "http://127.0.0.1:\(port)\(snapshotPath)")!
+}
+
+private final class EloqLocalBridge {
+    private struct HTTPRequest {
+        let method: String
+        let path: String
+    }
+
+    private let queue = DispatchQueue(label: "studio.orbitlabs.eloq.local-bridge")
+    private let listener: NWListener
+    private let snapshotDataProvider: @Sendable () async -> Data?
+    private let stateHandler: @Sendable (Result<UInt16, Error>) -> Void
+
+    init(
+        snapshotDataProvider: @escaping @Sendable () async -> Data?,
+        stateHandler: @escaping @Sendable (Result<UInt16, Error>) -> Void = { _ in }
+    ) throws {
+        self.snapshotDataProvider = snapshotDataProvider
+        self.stateHandler = stateHandler
+        self.listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: EloqLocalBridgeConfiguration.port)!)
+
+        listener.newConnectionHandler = { [weak self] connection in
+            self?.handle(connection)
+        }
+        listener.stateUpdateHandler = { [weak self] state in
+            guard let self else { return }
+            switch state {
+            case .ready:
+                self.stateHandler(.success(EloqLocalBridgeConfiguration.port))
+            case .failed(let error):
+                self.stateHandler(.failure(error))
+                self.listener.cancel()
+            default:
+                break
+            }
+        }
+        listener.start(queue: queue)
+    }
+
+    func stop() {
+        listener.cancel()
+    }
+
+    private func handle(_ connection: NWConnection) {
+        guard Self.isLoopback(connection.endpoint) else {
+            connection.cancel()
+            return
+        }
+
+        connection.start(queue: queue)
+        receiveRequest(on: connection, buffer: Data())
+    }
+
+    private func receiveRequest(on connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+
+            if error != nil {
+                connection.cancel()
+                return
+            }
+
+            var nextBuffer = buffer
+            if let data, !data.isEmpty {
+                nextBuffer.append(data)
+            }
+
+            if let request = self.parseRequest(from: nextBuffer) {
+                Task {
+                    let response = await self.responseData(for: request)
+                    connection.send(content: response, completion: .contentProcessed { _ in
+                        connection.cancel()
+                    })
+                }
+                return
+            }
+
+            if isComplete {
+                connection.cancel()
+                return
+            }
+
+            self.receiveRequest(on: connection, buffer: nextBuffer)
+        }
+    }
+
+    private func parseRequest(from buffer: Data) -> HTTPRequest? {
+        guard buffer.range(of: Data("\r\n\r\n".utf8)) != nil,
+              let headerText = String(data: buffer, encoding: .utf8),
+              let requestLine = headerText.components(separatedBy: "\r\n").first else {
+            return nil
+        }
+
+        let parts = requestLine.split(separator: " ", omittingEmptySubsequences: true)
+        guard parts.count >= 2 else {
+            return nil
+        }
+
+        return HTTPRequest(method: String(parts[0]), path: String(parts[1]))
+    }
+
+    private func responseData(for request: HTTPRequest) async -> Data {
+        if request.method == "OPTIONS" {
+            return httpResponse(status: "204 No Content")
+        }
+
+        guard request.method == "GET" else {
+            return httpResponse(
+                status: "405 Method Not Allowed",
+                body: Data("Method not allowed".utf8)
+            )
+        }
+
+        let path = request.path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? request.path
+        switch path {
+        case "/", EloqLocalBridgeConfiguration.snapshotPath:
+            guard let snapshotData = await snapshotDataProvider() else {
+                return httpResponse(
+                    status: "500 Internal Server Error",
+                    body: Data("Snapshot unavailable".utf8)
+                )
+            }
+            return httpResponse(
+                status: "200 OK",
+                contentType: "application/json; charset=utf-8",
+                body: snapshotData
+            )
+        default:
+            return httpResponse(
+                status: "404 Not Found",
+                body: Data("Not found".utf8)
+            )
+        }
+    }
+
+    private func httpResponse(
+        status: String,
+        contentType: String = "text/plain; charset=utf-8",
+        body: Data = Data()
+    ) -> Data {
+        let header = [
+            "HTTP/1.1 \(status)",
+            "Access-Control-Allow-Origin: *",
+            "Access-Control-Allow-Methods: GET, OPTIONS",
+            "Access-Control-Allow-Headers: Content-Type",
+            "Cache-Control: no-store",
+            "Content-Type: \(contentType)",
+            "Content-Length: \(body.count)",
+            "Connection: close",
+            "",
+            "",
+        ].joined(separator: "\r\n")
+
+        var response = Data(header.utf8)
+        response.append(body)
+        return response
+    }
+
+    private static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        guard case let .hostPort(host, _) = endpoint else {
+            return false
+        }
+
+        let hostValue = host.debugDescription.lowercased()
+        return hostValue == "127.0.0.1" || hostValue == "::1" || hostValue == "localhost"
     }
 }
 
@@ -53,6 +226,7 @@ final class EloqWorkspace: ObservableObject {
     private let storagePaths: EloqStoragePaths
     private var hotKeyManager: EloqGlobalHotKeyManager?
     private var exportTask: Task<Void, Never>?
+    private var localBridge: EloqLocalBridge?
 
     init(
         modelContext: ModelContext,
@@ -74,6 +248,11 @@ final class EloqWorkspace: ObservableObject {
         }
         refreshOpenAIKeyStatus()
         refresh()
+        startLocalBridge()
+    }
+
+    deinit {
+        localBridge?.stop()
     }
 
     var pendingSuggestions: [ConnectionSuggestion] {
@@ -137,6 +316,10 @@ final class EloqWorkspace: ObservableObject {
 
     var storageDirectoryPathText: String {
         storagePaths.rootDirectory.path
+    }
+
+    var browserBridgeURLText: String {
+        EloqLocalBridgeConfiguration.snapshotURL.absoluteString
     }
 
     var audoraImportDirectoryPathText: String {
@@ -740,6 +923,29 @@ final class EloqWorkspace: ObservableObject {
             : "No OpenAI key stored. Manual vocabulary management still works."
     }
 
+    private func startLocalBridge() {
+        do {
+            localBridge = try EloqLocalBridge(
+                snapshotDataProvider: { [weak self] in
+                    await MainActor.run {
+                        guard let self else { return nil }
+                        return try? self.encodedSnapshotData(prettyPrinted: false)
+                    }
+                },
+                stateHandler: { [weak self] result in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        if case .failure(let error) = result {
+                            self.lastBanner = "Browser bridge unavailable: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            )
+        } catch {
+            lastBanner = "Browser bridge unavailable: \(error.localizedDescription)"
+        }
+    }
+
     private func saveAndRefresh() throws {
         try modelContext.save()
         refresh()
@@ -777,10 +983,7 @@ final class EloqWorkspace: ObservableObject {
     private func exportSnapshot() throws {
         try ensureExportDirectory()
         let snapshot = buildSnapshot()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
+        let data = try encodedSnapshotData(snapshot: snapshot, prettyPrinted: true)
         try data.write(to: storagePaths.snapshotURL, options: .atomic)
 
         health = HealthStatus(
@@ -850,6 +1053,21 @@ final class EloqWorkspace: ObservableObject {
             words: snapshotWords,
             connections: snapshotConnections
         )
+    }
+
+    private func encodedSnapshotData(prettyPrinted: Bool) throws -> Data {
+        try encodedSnapshotData(snapshot: buildSnapshot(), prettyPrinted: prettyPrinted)
+    }
+
+    private func encodedSnapshotData(snapshot: SnapshotReadModel, prettyPrinted: Bool) throws -> Data {
+        let encoder = JSONEncoder()
+        var formatting: JSONEncoder.OutputFormatting = [.sortedKeys]
+        if prettyPrinted {
+            formatting.insert(.prettyPrinted)
+        }
+        encoder.outputFormatting = formatting
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(snapshot)
     }
 
     private func enrichConnections(for role: WordRole, announceResult: Bool = false) async {

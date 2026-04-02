@@ -141,6 +141,7 @@ private struct StorageSettingsTab: View {
                 VStack(alignment: .leading, spacing: 12) {
                     PathRow(label: "Eloq Storage", path: workspace.storageDirectoryPathText)
                     PathRow(label: "Snapshot Export", path: workspace.snapshotPathText)
+                    PathRow(label: "Browser Bridge", path: workspace.browserBridgeURLText)
                     PathRow(label: "Audora Import Folder", path: workspace.audoraImportDirectoryPathText)
 
                     HStack {
